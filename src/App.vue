@@ -6,6 +6,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 // const greetMsg = ref(""); // Greet 功能不再需要
 // const name = ref(""); // Greet 功能不再需要
 const selectedVideoPath = ref("");
+const projectName = ref(""); // 新增: 项目名称
 
 // async function greet() { // Greet 功能不再需要
 //   // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -27,31 +28,44 @@ async function selectVideoFile() {
       } else {
         selectedVideoPath.value = selected;
       }
+      projectName.value = ""; // 选择新视频时，清空项目名称，或基于文件名建议一个?
       console.log("Selected video path:", selectedVideoPath.value);
     } else {
       selectedVideoPath.value = "";
+      projectName.value = "";
       console.log("No file selected.");
     }
   } catch (error) {
     console.error("Error selecting file:", error);
     selectedVideoPath.value = "Error selecting file.";
+    projectName.value = "";
   }
 }
 
 // 新增: 处理视频的函数
 async function handleProcessVideo() {
   if (!selectedVideoPath.value) {
-    console.warn("No video selected to process.");
-    // 可以考虑在这里给用户一些提示，例如使用 alert 或者一个界面元素
     alert("请先选择一个视频文件！");
     return;
   }
+  if (!projectName.value.trim()) { // 检查项目名称是否为空或仅包含空格
+    alert("请输入项目名称！");
+    return;
+  }
+  // 简单的英文项目名校验 (只允许字母、数字、下划线、中划线)
+  if (!/^[a-zA-Z0-9_-]+$/.test(projectName.value.trim())) {
+    alert("项目名称只能包含英文字母、数字、下划线和中划线。");
+    return;
+  }
+
   try {
-    console.log(`Sending path to backend: ${selectedVideoPath.value}`);
-    // 调用后端的 process_video 命令
-    const result = await invoke("process_video", { path: selectedVideoPath.value });
-    console.log("Backend processing result:", result); // 期望后端返回一些信息
-    alert(`后端消息: ${result}`); // 简单显示后端返回
+    console.log(`Sending to backend - Path: ${selectedVideoPath.value}, Project: ${projectName.value.trim()}`);
+    const result = await invoke("process_video", { 
+      path: selectedVideoPath.value, 
+      projectName: projectName.value.trim()
+    });
+    console.log("Backend processing result:", result);
+    alert(`后端消息: ${result}`);
   } catch (error) {
     console.error("Error calling process_video command:", error);
     alert(`处理视频失败: ${error}`);
@@ -93,9 +107,22 @@ async function handleProcessVideo() {
     </div>
     <p v-if="selectedVideoPath">已选择: {{ selectedVideoPath }}</p>
 
-    <!-- 新增: 开始处理按钮 -->
+    <!-- 新增: 项目名称输入框 -->
     <div class="row" style="margin-top: 10px;" v-if="selectedVideoPath">
-      <button @click="handleProcessVideo" :disabled="!selectedVideoPath">
+      <input 
+        type="text" 
+        v-model="projectName" 
+        placeholder="请输入项目名称 (英文/数字)"
+        style="margin-right: 10px; width: 200px;"
+      />
+    </div>
+
+    <!-- 修改: 开始处理按钮 -->
+    <div class="row" style="margin-top: 10px;" v-if="selectedVideoPath">
+      <button 
+        @click="handleProcessVideo" 
+        :disabled="!selectedVideoPath || !projectName.trim()"
+      >
         开始处理
       </button>
     </div>
