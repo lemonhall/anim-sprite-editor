@@ -1,12 +1,13 @@
 <script setup>
 import { ref } from "vue";
-import { invoke } from "@tauri-apps/api/core"; // 取消注释 invoke
+import { invoke, convertFileSrc } from "@tauri-apps/api/core"; // 导入 convertFileSrc
 import { open } from "@tauri-apps/plugin-dialog";
 
 // const greetMsg = ref(""); // Greet 功能不再需要
 // const name = ref(""); // Greet 功能不再需要
 const selectedVideoPath = ref("");
 const projectName = ref(""); // 新增: 项目名称
+const videoPlayerSrc = ref(""); // 新增: 用于视频播放器的 src
 
 // async function greet() { // Greet 功能不再需要
 //   // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -29,31 +30,27 @@ async function selectVideoFile() {
       }]
     });
     if (selected) {
-      if (Array.isArray(selected)) {
-        selectedVideoPath.value = selected[0];
-      } else {
-        selectedVideoPath.value = selected;
-      }
-      // projectName.value = ""; // 不再自动清空项目名称
-      console.log("Selected video path:", selectedVideoPath.value);
+      const path = Array.isArray(selected) ? selected[0] : selected;
+      selectedVideoPath.value = path;
+      videoPlayerSrc.value = convertFileSrc(path); // 转换为可播放的 URL
+      console.log("Selected video path:", path);
+      console.log("Video player src:", videoPlayerSrc.value);
 
-      // 如果项目名称已有效，则自动开始处理
       if (isProjectNameValid(projectName.value)) {
         console.log("Project name is valid, attempting auto-process...");
         await handleProcessVideo(); 
       } else {
         console.log("Project name is not (yet) valid, skipping auto-process.");
       }
-
     } else {
       selectedVideoPath.value = "";
-      // projectName.value = ""; // 如果没有选择文件，是否清空项目名可以斟酌，暂时不清空
+      videoPlayerSrc.value = ""; // 清空播放器 src
       console.log("No file selected.");
     }
   } catch (error) {
     console.error("Error selecting file:", error);
     selectedVideoPath.value = "Error selecting file.";
-    // projectName.value = ""; // 出错时是否清空项目名可以斟酌，暂时不清空
+    videoPlayerSrc.value = ""; // 出错时清空
   }
 }
 
@@ -104,6 +101,11 @@ async function handleProcessVideo() {
       <button @click="selectVideoFile">导入</button>
     </div>
     <!-- <p v-if="selectedVideoPath">已导入: {{ selectedVideoPath }}</p> --> <!-- 移除已导入提示 -->
+
+    <!-- 新增: 视频播放器 -->
+    <div class="row" style="margin-top: 20px;" v-if="videoPlayerSrc">
+      <video :src="videoPlayerSrc" controls style="max-width: 80%; max-height: 400px; border: 1px solid #ccc;"></video>
+    </div>
 
     <!-- 移除了 Vite, Tauri, Vue logos 和相关文字 -->
     <!--

@@ -18,7 +18,11 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self' http://localhost:1420 asset: http://asset.localhost tauri:; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:1420; style-src 'self' 'unsafe-inline' http://localhost:1420; img-src * data: asset: http://asset.localhost; media-src * data: asset: http://asset.localhost;",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["E:/**"]
+      },
       "capabilities": [
         {
           "identifier": "default-capability",
