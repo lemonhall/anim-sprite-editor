@@ -1,24 +1,14 @@
 <script setup>
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core"; // 导入 convertFileSrc
 import { open } from "@tauri-apps/plugin-dialog";
 
-// const greetMsg = ref(""); // Greet 功能不再需要
-// const name = ref(""); // Greet 功能不再需要
 const selectedVideoPath = ref("");
 const projectName = ref(""); // 新增: 项目名称
 const videoPlayerSrc = ref(""); // 新增: 用于视频播放器的 src
-
-// async function greet() { // Greet 功能不再需要
-//   // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-//   greetMsg.value = await invoke("greet", { name: name.value });
-// }
-
-// 检查项目名称是否有效 (辅助函数)
-function isProjectNameValid(name) {
-  if (!name.trim()) return false;
-  return /^[a-zA-Z0-9_-]+$/.test(name.trim());
-}
+const fps = ref(10); // 新增: FPS ref，默认值为 10
+const extractedFrames = ref([]); // 新增: 存储提取出来的帧的 asset URL
+const processingMessage = ref(""); // 新增: 用于显示处理过程中的消息或错误
 
 async function selectVideoFile() {
   try {
@@ -33,6 +23,8 @@ async function selectVideoFile() {
       const path = Array.isArray(selected) ? selected[0] : selected;
       selectedVideoPath.value = path;
       videoPlayerSrc.value = convertFileSrc(path); // 转换为可播放的 URL
+      extractedFrames.value = []; // 清空旧的帧
+      processingMessage.value = ""; // 清空消息
       console.log("Selected video path:", path);
       console.log("Video player src:", videoPlayerSrc.value);
 
@@ -41,50 +33,88 @@ async function selectVideoFile() {
         await handleProcessVideo(); 
       } else {
         console.log("Project name is not (yet) valid, skipping auto-process.");
+        processingMessage.value = "请输入项目名称后，帧提取将自动开始。";
       }
     } else {
       selectedVideoPath.value = "";
       videoPlayerSrc.value = ""; // 清空播放器 src
+      extractedFrames.value = []; 
+      processingMessage.value = "";
       console.log("No file selected.");
     }
   } catch (error) {
     console.error("Error selecting file:", error);
     selectedVideoPath.value = "Error selecting file.";
     videoPlayerSrc.value = ""; // 出错时清空
+    extractedFrames.value = [];
+    processingMessage.value = `选择文件出错: ${error}`;
   }
 }
 
 // 新增: 处理视频的函数
 async function handleProcessVideo() {
   if (!selectedVideoPath.value) {
-    alert("请先选择一个视频文件！");
+    processingMessage.value = "请先选择一个视频文件！";
     return;
   }
   if (!isProjectNameValid(projectName.value)) {
-    alert("请输入有效的项目名称 (只能包含英文字母、数字、下划线和中划线)！");
+    processingMessage.value = "请输入有效的项目名称 (只能包含英文字母、数字、下划线和中划线)！";
+    return;
+  }
+  if (fps.value <= 0) { // 简单的 FPS 值校验
+    processingMessage.value = "FPS 必须是大于0的数字！";
     return;
   }
 
+  processingMessage.value = "正在处理视频，请稍候...";
+  extractedFrames.value = []; // 开始处理前清空旧帧
+
   try {
-    console.log(`Sending to backend - Path: ${selectedVideoPath.value}, Project: ${projectName.value.trim()}`);
-    const result = await invoke("process_video", { 
+    console.log(`Sending to backend - Path: ${selectedVideoPath.value}, Project: ${projectName.value.trim()}, FPS: ${fps.value}`);
+    const framePaths = await invoke("process_video", { 
       path: selectedVideoPath.value, 
-      projectName: projectName.value.trim()
+      projectName: projectName.value.trim(),
+      fps: Number(fps.value) // 确保传递的是数字类型
     });
-    console.log("Backend processing result:", result);
-    alert(`后端消息: ${result}`);
+    console.log("Backend processing result (frame paths):", framePaths);
+    
+    if (Array.isArray(framePaths) && framePaths.length > 0) {
+      extractedFrames.value = framePaths.map(p => convertFileSrc(p));
+      processingMessage.value = `成功提取 ${framePaths.length} 帧！`;
+    } else if (Array.isArray(framePaths) && framePaths.length === 0) {
+      processingMessage.value = "处理成功，但未提取到任何帧。请检查视频内容和FPS设置。";
+    } else {
+      processingMessage.value = "后端返回了意外的数据格式。";
+      console.warn("Unexpected backend response:", framePaths);
+    }
+
   } catch (error) {
     console.error("Error calling process_video command:", error);
-    alert(`处理视频失败: ${error}`);
+    processingMessage.value = `处理视频失败: ${error}`;
   }
 }
+
+// 检查项目名称是否有效 (辅助函数)
+function isProjectNameValid(name) {
+  if (!name || !name.trim()) return false;
+  return /^[a-zA-Z0-9_-]+$/.test(name.trim());
+}
+
+watch(projectName, (newName) => {
+  if (selectedVideoPath.value && isProjectNameValid(newName)) {
+    handleProcessVideo();
+  } else if (selectedVideoPath.value && !isProjectNameValid(newName)) {
+    processingMessage.value = "请输入有效的项目名称以开始处理。";
+    extractedFrames.value = []; // 如果项目名失效，也清空帧
+  }
+});
 </script>
 
 <template>
   <main class="container">
     <!-- <h1>视频转精灵图工具</h1> --> <!-- 移除页面标题 -->
 
-    <!-- 项目名称输入框 - 保持在左上角区域 -->
+    <!-- 项目名称和 FPS 输入框 -->
     <div style="display: flex; justify-content: flex-start; align-items: center; margin-bottom: 20px; padding-left: 20px;">
       <label for="project-name-input" style="margin-right: 8px; font-size: 0.9em;">项目名称:</label>
       <input 
@@ -92,51 +122,61 @@ async function handleProcessVideo() {
         type="text" 
         v-model="projectName" 
         placeholder="(英文/数字/_-)"
-        style="width: 200px; padding: 0.4em 0.8em; font-size: 0.9em;"
+        style="width: 180px; padding: 0.4em 0.8em; font-size: 0.9em; margin-right: 20px;" 
+      />
+      <label for="fps-input" style="margin-right: 8px; font-size: 0.9em;">FPS:</label>
+      <input 
+        id="fps-input"
+        type="number" 
+        v-model.number="fps" 
+        min="1"
+        max="60" 
+        style="width: 70px; padding: 0.4em 0.8em; font-size: 0.9em;"
       />
     </div>
 
     <!-- "导入" 按钮居中 -->
     <div class="row" style="margin-top: 10px;"> <!-- 调整了 margin-top -->
-      <button @click="selectVideoFile">导入</button>
+      <button @click="selectVideoFile">导入视频</button>
     </div>
     <!-- <p v-if="selectedVideoPath">已导入: {{ selectedVideoPath }}</p> --> <!-- 移除已导入提示 -->
 
     <!-- 新增: 视频播放器 -->
     <div class="row" style="margin-top: 20px;" v-if="videoPlayerSrc">
-      <video :src="videoPlayerSrc" controls style="max-width: 80%; max-height: 400px; border: 1px solid #ccc;"></video>
+      <video :src="videoPlayerSrc" controls style="max-width: 360px; max-height: 240px; border: 1px solid #ccc;"></video>
     </div>
 
-    <!-- 移除了 Vite, Tauri, Vue logos 和相关文字 -->
-    <!--
-    <div class="row">
-      <a href="https://vitejs.dev" target="_blank">
-        <img src="/vite.svg" class="logo vite" alt="Vite logo" />
-      </a>
-      <a href="https://tauri.app" target="_blank">
-        <img src="/tauri.svg" class="logo tauri" alt="Tauri logo" />
-      </a>
-      <a href="https://vuejs.org/" target="_blank">
-        <img src="./assets/vue.svg" class="logo vue" alt="Vue logo" />
-      </a>
+    <div class="row" style="margin-top: 15px; min-height: 20px;" v-if="processingMessage">
+      <p style="font-size: 0.9em; color: #333;">{{ processingMessage }}</p>
     </div>
-    <p>Click on the Tauri, Vite, and Vue logos to learn more.</p>
-    -->
 
-    <!-- 移除了 Greet 功能的表单 -->
-    <!--
-    <form class="row" @submit.prevent="greet">
-      <input id="greet-input" v-model="name" placeholder="Enter a name..." />
-      <button type="submit">Greet</button>
-    </form>
-    <p>{{ greetMsg }}</p>
-    -->
+    <div class="frames-grid-container" v-if="extractedFrames.length > 0">
+      <div v-for="(frameSrc, index) in extractedFrames" :key="index" class="frame-item">
+        <img :src="frameSrc" :alt="`Frame ${index + 1}`" />
+      </div>
+    </div>
 
   </main>
 </template>
 
 <style scoped>
-/* 清理了 scoped 样式，移除了 .logo 相关定义 */
+.frames-grid-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 10px;
+  padding: 20px;
+  margin-top: 10px;
+  border-top: 1px solid #eee; 
+}
+
+.frame-item img {
+  width: 100%;
+  height: auto;
+  object-fit: contain; 
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
 </style>
 <style>
 /* 清理了全局样式，移除了 .logo 和 a 相关定义 */
