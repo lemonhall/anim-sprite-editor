@@ -1,87 +1,53 @@
 <script setup>
-import { ref, watch } from "vue";
-import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { ref } from "vue"; // Watch is no longer needed here for project name/fps changes for auto-processing
+import { invoke } from "@tauri-apps/api/core"; // convertFileSrc is now in the child component
 
-// 导入新组件
+// 导入子组件
 import FrameAnimator from './components/FrameAnimator.vue';
 import FrameThumbnailsGrid from './components/FrameThumbnailsGrid.vue';
+import ProjectSetupAndImport from './components/ProjectSetupAndImport.vue';
 
-const selectedVideoPath = ref("");
-const projectName = ref("");
-const videoPlayerSrc = ref("");
-const fps = ref(10); // 这个 FPS 仍由 App.vue 管理，并传递给 FrameAnimator
-const extractedFrames = ref([]); // 这个由 App.vue 管理，并传递给两个子组件
+// App.vue 现在主要管理处理后的结果和整体状态
+const extractedFrames = ref([]);
 const processingMessage = ref("");
+const currentFpsForAnimator = ref(10); // To store the FPS that was used for the current extractedFrames
 
-async function selectVideoFile() {
-  try {
-    const selected = await open({
-      multiple: false,
-      filters: [{
-        name: 'Video',
-        extensions: ['mp4']
-      }]
-    });
-    if (selected) {
-      const path = Array.isArray(selected) ? selected[0] : selected;
-      selectedVideoPath.value = path;
-      videoPlayerSrc.value = convertFileSrc(path);
-      extractedFrames.value = []; 
-      processingMessage.value = ""; 
-      console.log("Selected video path:", path);
-      console.log("Video player src:", videoPlayerSrc.value);
+// 移除了 selectedVideoPath, projectName, fps, videoPlayerSrc refs as they are managed by ProjectSetupAndImport
 
-      if (isProjectNameValid(projectName.value)) {
-        console.log("Project name is valid, attempting auto-process...");
-        await handleProcessVideo(); 
-      } else {
-        console.log("Project name is not (yet) valid, skipping auto-process.");
-        processingMessage.value = "请输入项目名称后，帧提取将自动开始。";
-      }
-    } else {
-      selectedVideoPath.value = "";
-      videoPlayerSrc.value = "";
-      extractedFrames.value = []; 
-      processingMessage.value = "";
-      console.log("No file selected.");
-    }
-  } catch (error) {
-    console.error("Error selecting file:", error);
-    selectedVideoPath.value = "Error selecting file.";
-    videoPlayerSrc.value = ""; 
-    extractedFrames.value = [];
-    processingMessage.value = `选择文件出错: ${error}`;
-  }
+// 这个函数现在由 ProjectSetupAndImport 组件的 'import-ready' 事件触发
+async function handleVideoImportReady(importData) {
+  console.log("App.vue received import-ready with data:", importData);
+  processingMessage.value = "正在准备处理视频...";
+  extractedFrames.value = []; // Clear previous frames
+  
+  // Store the FPS that will be used for processing, to pass to FrameAnimator
+  currentFpsForAnimator.value = importData.fps;
+
+  // 调用后端处理
+  await processVideoWithBackend(importData.videoPath, importData.projectName, importData.fps);
 }
 
-async function handleProcessVideo() {
-  if (!selectedVideoPath.value) {
-    processingMessage.value = "请先选择一个视频文件！";
-    return;
-  }
-  if (!isProjectNameValid(projectName.value)) {
-    processingMessage.value = "请输入有效的项目名称 (只能包含英文字母、数字、下划线和中划线)！";
-    return;
-  }
-  if (fps.value <= 0) {
-    processingMessage.value = "FPS 必须是大于0的数字！";
-    return;
-  }
-
+// 新的函数，专门用于与后端交互
+async function processVideoWithBackend(videoPath, projectName, fpsValue) {
   processingMessage.value = "正在处理视频，请稍候...";
-  extractedFrames.value = []; 
-
   try {
-    console.log(`Sending to backend - Path: ${selectedVideoPath.value}, Project: ${projectName.value.trim()}, FPS: ${fps.value}`);
+    console.log(`Sending to backend - Path: ${videoPath}, Project: ${projectName}, FPS: ${fpsValue}`);
     const framePaths = await invoke("process_video", { 
-      path: selectedVideoPath.value, 
-      projectName: projectName.value.trim(),
-      fps: Number(fps.value)
+      path: videoPath, 
+      projectName: projectName,
+      fps: Number(fpsValue)
     });
     console.log("Backend processing result (frame paths):", framePaths);
     
     if (Array.isArray(framePaths) && framePaths.length > 0) {
+      // Note: convertFileSrc is now called inside FrameAnimator and FrameThumbnailsGrid if they receive raw paths
+      // However, our backend already returns absolute paths, and convertFileSrc is needed by frontend.
+      // For simplicity, let's assume convertFileSrc is still best done here before passing to children requiring asset URLs.
+      // Re-evaluating: FrameAnimator and FrameThumbnailsGrid receive URLs ready for <img src>
+      // So App.vue should convert them.
+      // The backend provides absolute paths. convertFileSrc is needed.
+      // Let's do it here as before.
+      const { convertFileSrc } = await import('@tauri-apps/api/core'); // Dynamic import if not globally available
       extractedFrames.value = framePaths.map(p => convertFileSrc(p)); 
       processingMessage.value = `成功提取 ${framePaths.length} 帧！`;
     } else if (Array.isArray(framePaths) && framePaths.length === 0) {
@@ -100,60 +66,37 @@ async function handleProcessVideo() {
   }
 }
 
-function isProjectNameValid(name) {
-  if (!name || !name.trim()) return false;
-  return /^[a-zA-Z0-9_-]+$/.test(name.trim());
+function updateProcessingMessage(message) {
+  processingMessage.value = message;
 }
 
-watch(projectName, (newName) => {
-  if (selectedVideoPath.value && isProjectNameValid(newName)) {
-    handleProcessVideo();
-  } else if (selectedVideoPath.value && !isProjectNameValid(newName)) {
-    processingMessage.value = "请输入有效的项目名称以开始处理。";
-    extractedFrames.value = []; 
-  }
-});
+function handleImportError(errorMessage) {
+  processingMessage.value = errorMessage;
+  extractedFrames.value = []; // Clear frames on import error
+}
+
+// 移除了旧的 isProjectNameValid, selectVideoFile, handleProcessVideo (renamed/refactored)
+// 移除了监听 projectName 的 watch, App.vue now reacts to events from ProjectSetupAndImport
 
 </script>
 
 <template>
   <main class="container">
-    <div style="display: flex; justify-content: flex-start; align-items: center; margin-bottom: 20px; padding-left: 20px;">
-      <label for="project-name-input" style="margin-right: 8px; font-size: 0.9em;">项目名称:</label>
-      <input 
-        id="project-name-input"
-        type="text" 
-        v-model="projectName" 
-        placeholder="(英文/数字/_-)"
-        style="width: 180px; padding: 0.4em 0.8em; font-size: 0.9em; margin-right: 20px;" 
-      />
-      <label for="fps-input" style="margin-right: 8px; font-size: 0.9em;">FPS:</label>
-      <input 
-        id="fps-input"
-        type="number" 
-        v-model.number="fps" 
-        min="1"
-        max="60" 
-        style="width: 70px; padding: 0.4em 0.8em; font-size: 0.9em;"
-      />
+    <ProjectSetupAndImport 
+      @import-ready="handleVideoImportReady"
+      @processing-status="updateProcessingMessage"
+      @import-error="handleImportError"
+    />
+
+    <!-- 处理消息显示 -->
+    <div class="row processing-status-display" v-if="processingMessage">
+      <p>{{ processingMessage }}</p>
     </div>
 
-    <div class="row" style="margin-top: 10px;">
-      <button @click="selectVideoFile">导入视频</button>
-    </div>
-
-    <div class="row" style="margin-top: 20px;" v-if="videoPlayerSrc">
-      <video :src="videoPlayerSrc" controls style="max-width: 360px; max-height: 240px; border: 1px solid #ccc;"></video>
-    </div>
-
-    <div class="row" style="margin-top: 15px; min-height: 20px;" v-if="processingMessage">
-      <p style="font-size: 0.9em; color: #333; text-align: center;">{{ processingMessage }}</p>
-    </div>
-
-    <!-- 使用新组件 -->
+    <!-- 动画播放器和缩略图网格 -->
     <FrameAnimator 
       :frames="extractedFrames" 
-      :fps="fps" 
+      :fps="currentFpsForAnimator" 
       v-if="extractedFrames.length > 0"
     />
 
@@ -166,12 +109,19 @@ watch(projectName, (newName) => {
 </template>
 
 <style scoped>
-/* 
-  移除了 .animation-section, .animation-controls, .fps-display, 
-  .animation-player, .animation-preview-img, .placeholder-text, 
-  .frames-grid-container, .frame-item img 的样式定义，
-  因为它们现在分别在 FrameAnimator.vue 和 FrameThumbnailsGrid.vue 中。
-*/
+/* App.vue scoped styles are now minimal */
+.processing-status-display {
+  margin-top: 0; /* Adjust as ProjectSetupAndImport has margin-bottom */
+  margin-bottom: 15px;
+  min-height: 20px; 
+  text-align: center;
+  font-size: 0.9em;
+  color: #333; /* Or make it more prominent for errors */
+}
+
+.processing-status-display p {
+    margin: 0; /* Remove default p margin */
+}
 </style>
 
 <style>
@@ -205,9 +155,8 @@ watch(projectName, (newName) => {
   width: 100%; 
 }
 
-h1 {
-  text-align: center;
-}
+/* Other global styles like h1, input, button are still here but primarily used by child components now */
+/* It might be good to move them to a global CSS file if they are truly global */
 
 input,
 button {
