@@ -1,13 +1,41 @@
 <script setup>
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 
 const greetMsg = ref("");
 const name = ref("");
+const selectedVideoPath = ref("");
 
 async function greet() {
   // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
   greetMsg.value = await invoke("greet", { name: name.value });
+}
+
+async function selectVideoFile() {
+  try {
+    const selected = await open({
+      multiple: false,
+      filters: [{
+        name: 'Video',
+        extensions: ['mp4']
+      }]
+    });
+    if (selected) {
+      if (Array.isArray(selected)) {
+        selectedVideoPath.value = selected[0];
+      } else {
+        selectedVideoPath.value = selected;
+      }
+      console.log("Selected video path:", selectedVideoPath.value);
+    } else {
+      selectedVideoPath.value = "";
+      console.log("No file selected.");
+    }
+  } catch (error) {
+    console.error("Error selecting file:", error);
+    selectedVideoPath.value = "Error selecting file.";
+  }
 }
 </script>
 
@@ -33,6 +61,12 @@ async function greet() {
       <button type="submit">Greet</button>
     </form>
     <p>{{ greetMsg }}</p>
+
+    <div class="row" style="margin-top: 20px;">
+      <button @click="selectVideoFile">选择 MP4 视频文件</button>
+    </div>
+    <p v-if="selectedVideoPath">已选择: {{ selectedVideoPath }}</p>
+
   </main>
 </template>
 

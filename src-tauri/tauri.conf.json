@@ -18,7 +18,17 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "capabilities": [
+        {
+          "identifier": "default-capability",
+          "description": "Default capabilities for the application, including dialog access.",
+          "windows": ["*"],
+          "permissions": [
+            "dialog:default"
+          ]
+        }
+      ]
     }
   },
   "bundle": {
@@ -31,5 +41,8 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "dialog": null
   }
 }
