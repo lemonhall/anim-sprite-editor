@@ -10,6 +10,12 @@ const fps = ref(10); // 新增: FPS ref，默认值为 10
 const extractedFrames = ref([]); // 新增: 存储提取出来的帧的 asset URL
 const processingMessage = ref(""); // 新增: 用于显示处理过程中的消息或错误
 
+// 新增: 动画播放相关 refs
+const isPlaying = ref(false);
+const animationTimerId = ref(null);
+const currentFrameForAnimationSrc = ref(''); // 当前动画播放器显示的帧 src
+const currentAnimationIndex = ref(0);     // 当前动画播放帧的索引
+
 async function selectVideoFile() {
   try {
     const selected = await open({
@@ -100,12 +106,71 @@ function isProjectNameValid(name) {
   return /^[a-zA-Z0-9_-]+$/.test(name.trim());
 }
 
+// 动画控制方法
+function startAnimation() {
+  if (extractedFrames.value.length === 0 || fps.value <= 0) return;
+  
+  isPlaying.value = true;
+  if (animationTimerId.value) {
+    clearInterval(animationTimerId.value);
+  }
+  animationTimerId.value = setInterval(() => {
+    currentAnimationIndex.value = (currentAnimationIndex.value + 1) % extractedFrames.value.length;
+    currentFrameForAnimationSrc.value = extractedFrames.value[currentAnimationIndex.value];
+  }, 1000 / fps.value);
+}
+
+function stopAnimation() {
+  if (animationTimerId.value) {
+    clearInterval(animationTimerId.value);
+    animationTimerId.value = null;
+  }
+  isPlaying.value = false;
+}
+
+function togglePlayAnimation() {
+  if (extractedFrames.value.length === 0) return;
+  if (isPlaying.value) {
+    stopAnimation();
+  } else {
+    // 开始播放前，确保 currentAnimationIndex 和 currentFrameForAnimationSrc 是初始状态或基于当前 index
+    if(currentFrameForAnimationSrc.value === '' && extractedFrames.value.length > 0) {
+        currentAnimationIndex.value = 0;
+        currentFrameForAnimationSrc.value = extractedFrames.value[0];
+    } else if (extractedFrames.value.length > 0) {
+        // 如果之前有选中的帧，就从那个帧开始，或者总是从0开始
+        // currentFrameForAnimationSrc.value = extractedFrames.value[currentAnimationIndex.value];
+        // 为了简化，暂停后再播放总是从当前帧的下一帧开始或重头开始（如果已是最后一帧）
+        // startAnimation 会处理 index 的递增和 src 的更新
+    }
+    startAnimation();
+  }
+}
+
+watch(extractedFrames, (newFrames) => {
+  stopAnimation();
+  currentAnimationIndex.value = 0;
+  if (newFrames && newFrames.length > 0) {
+    currentFrameForAnimationSrc.value = newFrames[0]; // 默认显示第一帧
+  } else {
+    currentFrameForAnimationSrc.value = ''; // 清空
+  }
+});
+
 watch(projectName, (newName) => {
   if (selectedVideoPath.value && isProjectNameValid(newName)) {
     handleProcessVideo();
   } else if (selectedVideoPath.value && !isProjectNameValid(newName)) {
     processingMessage.value = "请输入有效的项目名称以开始处理。";
     extractedFrames.value = []; // 如果项目名失效，也清空帧
+  }
+});
+
+// 当FPS改变时，如果正在播放，则停止并用新的FPS重新启动动画
+watch(fps, (newFps) => {
+  if (isPlaying.value && newFps > 0 && extractedFrames.value.length > 0) {
+    stopAnimation(); // 先停止旧的
+    startAnimation(); // 用新的FPS启动
   }
 });
 </script>
@@ -150,6 +215,25 @@ watch(projectName, (newName) => {
       <p style="font-size: 0.9em; color: #333;">{{ processingMessage }}</p>
     </div>
 
+    <!-- 动画播放器和控制 -->
+    <div class="animation-section" v-if="extractedFrames.length > 0">
+      <div class="animation-controls">
+        <button @click="togglePlayAnimation" :disabled="extractedFrames.length === 0">
+          {{ isPlaying ? '暂停动画' : '播放动画' }}
+        </button>
+        <span class="fps-display">动画FPS: {{ fps }}</span>
+      </div>
+      <div class="animation-player">
+        <img 
+          v-if="currentFrameForAnimationSrc"
+          :src="currentFrameForAnimationSrc" 
+          alt="动画预览" 
+          class="animation-preview-img"
+        />
+        <div v-else class="placeholder-text">处理完成后，点击播放预览</div>
+      </div>
+    </div>
+
     <div class="frames-grid-container" v-if="extractedFrames.length > 0">
       <div v-for="(frameSrc, index) in extractedFrames" :key="index" class="frame-item">
         <img :src="frameSrc" :alt="`Frame ${index + 1}`" />
@@ -160,6 +244,56 @@ watch(projectName, (newName) => {
 </template>
 
 <style scoped>
+.animation-section {
+  margin-top: 20px;
+  padding: 15px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background-color: #f9f9f9;
+  display: flex;
+  flex-direction: column;
+  align-items: center; /* 水平居中控制和播放器 */
+}
+
+.animation-controls {
+  margin-bottom: 15px;
+  display: flex;
+  align-items: center;
+  gap: 15px; /* 按钮和FPS文字之间的间距 */
+}
+
+.animation-controls button {
+  padding: 0.5em 1em;
+}
+
+.fps-display {
+  font-size: 0.9em;
+  color: #555;
+}
+
+.animation-player {
+  width: 100%;
+  max-width: 300px; /* 限制动画预览图的最大宽度 */
+  height: 200px;    /* 固定高度，避免播放时页面跳动 */
+  background-color: #eee;
+  border: 1px solid #ddd;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden; /* 确保图片不会超出容器 */
+}
+
+.animation-preview-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain; /* 保持图片比例，完整显示 */
+}
+
+.placeholder-text {
+  font-size: 0.9em;
+  color: #777;
+}
+
 .frames-grid-container {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
