@@ -13,6 +13,12 @@ const projectName = ref(""); // 新增: 项目名称
 //   greetMsg.value = await invoke("greet", { name: name.value });
 // }
 
+// 检查项目名称是否有效 (辅助函数)
+function isProjectNameValid(name) {
+  if (!name.trim()) return false;
+  return /^[a-zA-Z0-9_-]+$/.test(name.trim());
+}
+
 async function selectVideoFile() {
   try {
     const selected = await open({
@@ -28,17 +34,26 @@ async function selectVideoFile() {
       } else {
         selectedVideoPath.value = selected;
       }
-      projectName.value = ""; // 选择新视频时，清空项目名称，或基于文件名建议一个?
+      // projectName.value = ""; // 不再自动清空项目名称
       console.log("Selected video path:", selectedVideoPath.value);
+
+      // 如果项目名称已有效，则自动开始处理
+      if (isProjectNameValid(projectName.value)) {
+        console.log("Project name is valid, attempting auto-process...");
+        await handleProcessVideo(); 
+      } else {
+        console.log("Project name is not (yet) valid, skipping auto-process.");
+      }
+
     } else {
       selectedVideoPath.value = "";
-      projectName.value = "";
+      // projectName.value = ""; // 如果没有选择文件，是否清空项目名可以斟酌，暂时不清空
       console.log("No file selected.");
     }
   } catch (error) {
     console.error("Error selecting file:", error);
     selectedVideoPath.value = "Error selecting file.";
-    projectName.value = "";
+    // projectName.value = ""; // 出错时是否清空项目名可以斟酌，暂时不清空
   }
 }
 
@@ -48,13 +63,8 @@ async function handleProcessVideo() {
     alert("请先选择一个视频文件！");
     return;
   }
-  if (!projectName.value.trim()) { // 检查项目名称是否为空或仅包含空格
-    alert("请输入项目名称！");
-    return;
-  }
-  // 简单的英文项目名校验 (只允许字母、数字、下划线、中划线)
-  if (!/^[a-zA-Z0-9_-]+$/.test(projectName.value.trim())) {
-    alert("项目名称只能包含英文字母、数字、下划线和中划线。");
+  if (!isProjectNameValid(projectName.value)) {
+    alert("请输入有效的项目名称 (只能包含英文字母、数字、下划线和中划线)！");
     return;
   }
 
@@ -75,7 +85,25 @@ async function handleProcessVideo() {
 
 <template>
   <main class="container">
-    <h1>视频转精灵图工具</h1>
+    <!-- <h1>视频转精灵图工具</h1> --> <!-- 移除页面标题 -->
+
+    <!-- 项目名称输入框 - 保持在左上角区域 -->
+    <div style="display: flex; justify-content: flex-start; align-items: center; margin-bottom: 20px; padding-left: 20px;">
+      <label for="project-name-input" style="margin-right: 8px; font-size: 0.9em;">项目名称:</label>
+      <input 
+        id="project-name-input"
+        type="text" 
+        v-model="projectName" 
+        placeholder="(英文/数字/_-)"
+        style="width: 200px; padding: 0.4em 0.8em; font-size: 0.9em;"
+      />
+    </div>
+
+    <!-- "导入" 按钮居中 -->
+    <div class="row" style="margin-top: 10px;"> <!-- 调整了 margin-top -->
+      <button @click="selectVideoFile">导入</button>
+    </div>
+    <!-- <p v-if="selectedVideoPath">已导入: {{ selectedVideoPath }}</p> --> <!-- 移除已导入提示 -->
 
     <!-- 移除了 Vite, Tauri, Vue logos 和相关文字 -->
     <!--
@@ -101,31 +129,6 @@ async function handleProcessVideo() {
     </form>
     <p>{{ greetMsg }}</p>
     -->
-
-    <div class="row" style="margin-top: 20px;">
-      <button @click="selectVideoFile">选择 MP4 视频文件</button>
-    </div>
-    <p v-if="selectedVideoPath">已选择: {{ selectedVideoPath }}</p>
-
-    <!-- 新增: 项目名称输入框 -->
-    <div class="row" style="margin-top: 10px;" v-if="selectedVideoPath">
-      <input 
-        type="text" 
-        v-model="projectName" 
-        placeholder="请输入项目名称 (英文/数字)"
-        style="margin-right: 10px; width: 200px;"
-      />
-    </div>
-
-    <!-- 修改: 开始处理按钮 -->
-    <div class="row" style="margin-top: 10px;" v-if="selectedVideoPath">
-      <button 
-        @click="handleProcessVideo" 
-        :disabled="!selectedVideoPath || !projectName.trim()"
-      >
-        开始处理
-      </button>
-    </div>
 
   </main>
 </template>
@@ -153,16 +156,17 @@ async function handleProcessVideo() {
 
 .container {
   margin: 0;
-  padding-top: 10vh;
+  padding-top: 20px; /* 减少顶部内边距 */
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  text-align: center;
+  /* justify-content: center; */ /* 让内容自然流动，项目名靠左，其他 .row 元素居中 */
+  /* text-align: center; */ /* text-align 会影响 label，在 row 中处理居中 */
 }
 
 .row {
   display: flex;
-  justify-content: center;
+  justify-content: center; /* 保持 .row 内元素居中 */
+  width: 100%; /* 确保 .row 占据可用宽度以便正确居中其内容 */
 }
 
 h1 {

@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "anim-sprite-editor",
+        "title": "视频转精灵图工具",
         "width": 800,
         "height": 600
       }
