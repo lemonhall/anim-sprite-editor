@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from "vue"; // Watch is no longer needed here for project name/fps changes for auto-processing
-import { invoke } from "@tauri-apps/api/core"; // convertFileSrc is now in the child component
+import { invoke, convertFileSrc } from "@tauri-apps/api/core"; // 静态导入 convertFileSrc
 
 // 导入子组件
 import FrameAnimator from './components/FrameAnimator.vue';
@@ -40,14 +40,7 @@ async function processVideoWithBackend(videoPath, projectName, fpsValue) {
     console.log("Backend processing result (frame paths):", framePaths);
     
     if (Array.isArray(framePaths) && framePaths.length > 0) {
-      // Note: convertFileSrc is now called inside FrameAnimator and FrameThumbnailsGrid if they receive raw paths
-      // However, our backend already returns absolute paths, and convertFileSrc is needed by frontend.
-      // For simplicity, let's assume convertFileSrc is still best done here before passing to children requiring asset URLs.
-      // Re-evaluating: FrameAnimator and FrameThumbnailsGrid receive URLs ready for <img src>
-      // So App.vue should convert them.
-      // The backend provides absolute paths. convertFileSrc is needed.
-      // Let's do it here as before.
-      const { convertFileSrc } = await import('@tauri-apps/api/core'); // Dynamic import if not globally available
+      // convertFileSrc 现在是从顶部导入的
       extractedFrames.value = framePaths.map(p => convertFileSrc(p)); 
       processingMessage.value = `成功提取 ${framePaths.length} 帧！`;
     } else if (Array.isArray(framePaths) && framePaths.length === 0) {
