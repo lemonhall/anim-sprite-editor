@@ -107,6 +107,47 @@
   - [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode)
   - [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
 
+## Development Log & Troubleshooting
+
+This section outlines some of the key development challenges encountered and their resolutions.
+
+### Issue: Global Crop Applied but UI Not Updating (or Partially Updating)
+
+**Symptoms:**
+
+*   After applying a global crop operation, backend successfully modified image files on disk.
+*   Initially, the UI (frame thumbnails and animator) would not update to show the cropped images, or only the first frame would update, or all frames would show a 500 error after attempting a refresh.
+*   Console logs might show that the backend command `apply_crop_to_files` reports success.
+
+**Root Causes Identified & Solutions:**
+
+1.  **Incorrect Prop Handling in Composables:**
+    *   **Problem:** When passing a `ref` (e.g., `originalFrameFilePaths` which is a `ref` to an array of strings) as a prop from `App.vue` to `FrameEditor.vue`, and then from `FrameEditor.vue` into the `useGlobalImageOperations.js` composable, the composable was receiving the unwrapped array directly, not the ref object itself. Attempts to access `originalFilePathsArray.value` inside the composable would then result in `undefined` because `originalFilePathsArray` was already the array.
+    *   **Solution:** Modified `useGlobalImageOperations.js` to directly use the passed array (e.g., `originalFilePathsArray.length`, `originalFilePathsArray.map(...)`) instead of trying to access its `.value` property.
+
+2.  **Type Mismatch for Backend Command Parameters:**
+    *   **Problem:** The Rust backend command `apply_crop_to_files` expected its `CropRectParams { x, y, width, height }` to have `u32` (unsigned 32-bit integer) values. The frontend, however, was deriving these values from canvas interactions, which resulted in floating-point numbers.
+    *   **Solution:** In `useGlobalImageOperations.js`, before invoking the `apply_crop_to_files` command, each field of the `cropParams` object (`x`, `y`, `width`, `height`) was explicitly converted to an integer using `Math.round()`.
+
+3.  **Incorrect Event Emission and Handling for UI Updates (Most Critical):**
+    *   **Problem:** The primary issue preventing UI updates after a successful global crop was that the component responsible for initiating the crop (`FrameEditor.vue`) was not correctly signaling the main `App.vue` component to refresh its list of displayed frames (`extractedFrames`). `App.vue` was incorrectly listening for an update event from a different component (`ProjectSetupAndImport.vue`).
+    *   **Solution:**
+        *   Ensured `FrameEditor.vue`, upon successful completion of the `applyGlobalCrop` operation (invoked from `useGlobalImageOperations.js`), emits a specific event: `emit('frames-source-files-updated')`.
+        *   Modified `App.vue`'s template to listen for this `frames-source-files-updated` event specifically on the `<FrameEditor>` component instance: `<FrameEditor @frames-source-files-updated="handleSourceFilesUpdatedFromEditor" ... />`.
+        *   Implemented the `handleSourceFilesUpdatedFromEditor` method in `App.vue`.
+
+4.  **Forcing Cache Busting and Vue Reactivity for Image Updates:**
+    *   **Problem:** Even if the event was correctly handled, browsers (and potentially Tauri's asset protocol) might cache the images. Simply assigning the same URLs to `extractedFrames` might not trigger a visual update if the URLs haven't changed.
+    *   **Solution (within `handleSourceFilesUpdatedFromEditor` in `App.vue`):
+        1.  **Timestamping URLs:** When regenerating the `extractedFrames` list, each `asset://` URL (obtained via `convertFileSrc(filePath)`) has a unique timestamp appended as a query parameter (e.g., `asset://path/to/image.png?v=1678886400000`). This forces the browser/webview to treat it as a new resource.
+        2.  **Vue Reactivity:** To ensure Vue detects the change and re-renders the list:
+            *   The `extractedFrames.value` array is first set to an empty array (`[]`).
+            *   `await nextTick()` is used to wait for the DOM to reflect this cleared state.
+            *   Then, `extractedFrames.value` is assigned the new array of timestamped URLs.
+            This pattern helps in robustly triggering list updates in Vue 3.
+
+By addressing these points, particularly the event flow and cache-busting techniques, the global crop operation now correctly updates all displayed frames in the UI.
+
 ---
 
 _此 README 文档将随着项目进展持续更新。_

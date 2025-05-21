@@ -1,5 +1,6 @@
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, nextTick } from "vue";
+import { convertFileSrc } from '@tauri-apps/api/core';
 // Removed invoke and convertFileSrc here as they are now in the composable
 
 // Import composables
@@ -157,22 +158,45 @@ function handleCancelEdit() {
   cancelFrameEdit();
 }
 
-function handleFramesGloballyUpdated(newFrames) {
-  console.log("[App.vue] Frames Globally Updated. New data length:", newFrames ? newFrames.length : 'null/undefined');
-  if (newFrames && Array.isArray(newFrames)) {
-    extractedFrames.value = newFrames;
-    // Optionally, re-initialize animator or parts of it if totalFrames changed implicitly
-    // initializeAnimatorOnNewVideo(newFrames.length, currentExtractionFps.value);
-    // However, totalFrames in useAnimatorSettings might still be the old one unless also updated.
-    // For now, just updating the visual frames.
-    processingMessage.value = "所有帧已更新并应用了全局操作。";
-  } else {
-    console.warn("[App.vue] Received invalid data for global frames update.");
-    processingMessage.value = "全局帧更新失败：数据无效。";
+// This function will be called when FrameEditor signals that source files were updated
+async function handleSourceFilesUpdatedFromEditor() {
+  console.log('[App.vue] handleSourceFilesUpdatedFromEditor TRIGGERED.');
+  console.log('[App.vue] originalFrameFilePaths.value at start:', JSON.parse(JSON.stringify(originalFrameFilePaths.value)));
+
+  if (!originalFrameFilePaths.value || originalFrameFilePaths.value.length === 0) {
+    console.warn('[App.vue] No original frame paths to update from.');
+    extractedFrames.value = [];
+    return;
   }
-  // Typically, after a global operation that updates all frames, the editor might be closed.
+
+  processingMessage.value = "正在刷新帧预览...";
+
+  const newExtractedFrames = originalFrameFilePaths.value.map((fp, index) => {
+    const assetUrl = convertFileSrc(fp); // fp should have \\?\ prefix
+    const newUrl = `${assetUrl}?v=${new Date().getTime()}`;
+    if (index === 0) {
+        console.log(`[App.vue] For original path ${fp}, generated new asset URL: ${newUrl}`);
+    }
+    return newUrl;
+  });
+  
+  console.log('[App.vue] Total new extracted frames to be assigned:', newExtractedFrames.length);
+  
+  extractedFrames.value = []; 
+  console.log('[App.vue] extractedFrames cleared.');
+
+  await nextTick(); // Ensure DOM updates before reassigning
+  
+  extractedFrames.value = newExtractedFrames;
+  console.log('[App.vue] extractedFrames.value updated after nextTick.');
+  if (extractedFrames.value.length > 0) {
+      console.log('[App.vue] First new extractedFrame URL after update:', extractedFrames.value[0]);
+  }
+  processingMessage.value = "帧预览已刷新。";
+
+  // Close the editor after global operation
   if (frameBeingEdited.value) {
-    cancelFrameEdit(); // Close the editor
+    cancelFrameEdit();
   }
 }
 
@@ -191,7 +215,6 @@ function handleFramesGloballyUpdated(newFrames) {
       :project-original-frame-paths="originalFrameFilePaths"
       :processing-message-string="processingMessage.value" 
       :update-app-processing-message="updateAppProcessingMessage"
-      @frames-globally-updated="handleFramesGloballyUpdated" 
     />
 
     <div class="row processing-status-display" v-if="processingMessage">
@@ -225,6 +248,7 @@ function handleFramesGloballyUpdated(newFrames) {
       :project-original-frame-paths="originalFrameFilePaths"
       :processing-message-string="processingMessage.value" 
       :update-app-processing-message="updateAppProcessingMessage"
+      @frames-source-files-updated="handleSourceFilesUpdatedFromEditor"
     />
 
   </main>

@@ -289,21 +289,20 @@ const handleApplyCropToAllFrames = async () => {
   };
 
   props.updateAppProcessingMessage("正在应用全局裁剪...");
-  console.log("[FrameEditor] Applying crop to all frames with params:", cropParamsToApply);
+  console.log(`[FrameEditor] Applying crop to all frames with params:`, cropParamsToApply);
   
-  // applyGlobalCrop now returns the new array of frames or null
-  const newFramesArray = await applyGlobalCrop(cropParamsToApply);
+  const success = await applyGlobalCrop(cropParamsToApply); // from useGlobalImageOperations
 
-  if (newFramesArray && Array.isArray(newFramesArray)) {
-    console.log("[FrameEditor] Global crop successful. Emitting frames-globally-updated.");
-    emit('frames-globally-updated', newFramesArray);
-    props.updateAppProcessingMessage("全局裁剪已应用！");
-    // Optionally, close the editor or reset the current frame view
-    // emit('cancel-edit'); 
+  if (success) {
+    console.log('[FrameEditor] Global crop reported success from composable, emitting frames-source-files-updated.');
+    emit('frames-source-files-updated');
   } else {
-    console.error("[FrameEditor] Global crop failed or returned no frames.");
-    // The message should have been set by useGlobalImageOperations
-    // props.updateAppProcessingMessage("全局裁剪失败。");
+    console.log('[FrameEditor] Global crop failed or was not attempted successfully according to composable.');
+    if (projectManagementRefs && typeof projectManagementRefs.updateProcessingMessage === 'function') {
+      projectManagementRefs.updateProcessingMessage('全局裁剪操作未成功或后端未确认成功。');
+    } else {
+      console.warn("[FrameEditor] Cannot update processing message: projectManagementRefs.updateProcessingMessage is not available.");
+    }
   }
 };
 // --- End Function to handle Apply Crop to All Frames ---
