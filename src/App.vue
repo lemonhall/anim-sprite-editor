@@ -45,6 +45,15 @@ const {
   cancelFrameEdit,
 } = useFrameEditing(extractedFrames, processingMessage);
 
+// Function to update App.vue's processingMessage ref
+const updateAppProcessingMessage = (newMessage) => {
+  if (typeof newMessage === 'string') {
+    processingMessage.value = newMessage;
+  } else {
+    console.warn("[App.vue] Attempted to update processingMessage with non-string value:", newMessage);
+  }
+};
+
 async function handleVideoImportReady(importData) {
   console.log("[App.vue] Import Ready. Data:", importData);
   if (frameBeingEdited.value) {
@@ -94,16 +103,27 @@ function handleAnimatorRangeSelected(payload) {
 }
 
 function updateProcessingMessage(message) {
-  processingMessage.value = message;
+  // This function is called by ProjectSetupAndImport's emit('processing-status')
+  // We should ensure this also updates the main processingMessage ref correctly.
+  if (typeof message === 'string') {
+    processingMessage.value = message; 
+  } else {
+    console.warn("[App.vue] Attempted to update processingMessage via updateProcessingMessage with non-string value:", message);
+  }
 }
 
 function handleImportError(errorMessage) {
-  processingMessage.value = errorMessage;
+  if (typeof errorMessage === 'string') {
+    processingMessage.value = errorMessage; 
+  } else {
+    processingMessage.value = "导入时发生未知错误。";
+    console.warn("[App.vue] handleImportError received non-string error message:", errorMessage);
+  }
   extractedFrames.value = [];
   originalFrameFilePaths.value = [];
-  initializeAnimatorOnNewVideo(0, currentExtractionFps.value);
+  initializeAnimatorOnNewVideo(0, currentExtractionFps.value); 
   if (frameBeingEdited.value) {
-    cancelFrameEdit();
+    cancelFrameEdit(); 
   }
 }
 
@@ -173,6 +193,10 @@ function handleCancelEdit() {
       @update-frame="handleFrameUpdated"
       @cancel-edit="handleCancelEdit"
       v-if="frameBeingEdited" 
+      :project-extracted-frames="extractedFrames"
+      :project-original-frame-paths="originalFrameFilePaths"
+      :processing-message-string="processingMessage.value" 
+      :update-app-processing-message="updateAppProcessingMessage"
     />
 
   </main>

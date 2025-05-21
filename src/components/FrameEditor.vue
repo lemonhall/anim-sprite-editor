@@ -1,14 +1,38 @@
 <script setup>
-import { ref, watch, onMounted, nextTick } from 'vue';
+import { ref, watch, onMounted, nextTick, computed } from 'vue';
+import useGlobalImageOperations from '../composables/useGlobalImageOperations';
 
 const props = defineProps({
   frameToEdit: { // Expected: { src: 'image_source_path', index: frame_index, originalSrc: 'original_asset_path_for_saving_if_needed' }
     type: Object,
     default: null
+  },
+  // Props from App.vue to be passed to useGlobalImageOperations
+  projectExtractedFrames: {
+    type: Object, // This is a ref, Vue handles unwrapping in template, direct use in script needs .value
+    required: true
+  },
+  projectOriginalFramePaths: {
+    type: Object, // This is a ref
+    required: true
+  },
+  // Changed props for message handling
+  processingMessageString: { // Current string value of the message
+    type: String,
+    default: ''
+  },
+  updateAppProcessingMessage: { // Function to update the message in App.vue
+    type: Function,
+    required: true
   }
 });
 
-const emit = defineEmits(['update-frame', 'cancel-edit']);
+console.log("[FrameEditor] Initial props.projectOriginalFramePaths:", props.projectOriginalFramePaths);
+console.log("[FrameEditor] Initial props.projectOriginalFramePaths.value:", props.projectOriginalFramePaths ? props.projectOriginalFramePaths.value : 'props.projectOriginalFramePaths is falsy');
+console.log("[FrameEditor] Initial props.projectExtractedFrames:", props.projectExtractedFrames);
+console.log("[FrameEditor] Initial props.projectExtractedFrames.value:", props.projectExtractedFrames ? props.projectExtractedFrames.value : 'props.projectExtractedFrames is falsy');
+
+const emit = defineEmits(['update-frame', 'cancel-edit']); // Removed 'apply-crop-to-all-frames' as it's handled internally now
 
 const canvasRef = ref(null);
 const ctx = ref(null);
@@ -25,6 +49,24 @@ const cropRect = ref({ // Stores crop rectangle relative to the original image d
 const startPoint = ref({ x: 0, y: 0 }); // Mouse down start point on canvas
 const canvasDisplaySize = ref({ width: 0, height: 0 }); // Actual display size of canvas for scaling mouse coords
 // --- End State for Cropping ---
+
+// Use a computed property to get the initial string value for the composable
+const initialMessageForComposable = computed(() => props.processingMessageString);
+
+// Initialize the global image operations composable
+const {
+  isProcessingGlobal, // Optional: use this to show a local loading state in FrameEditor
+  applyGlobalCrop
+} = useGlobalImageOperations(
+  { // projectManagementRefs
+    extractedFrames: props.projectExtractedFrames,
+    originalFrameFilePaths: props.projectOriginalFramePaths,
+  },
+  { // messageUpdater
+    initialProcessingMessage: props.processingMessageString, // Pass the initial string value directly
+    updateProcessingMessage: props.updateAppProcessingMessage // Pass the update function from App.vue
+  }
+);
 
 const redrawCanvas = () => {
   if (!ctx.value || !canvasRef.value) return;
@@ -230,6 +272,44 @@ const handleResetCrop = () => {
 };
 // --- End Function to handle Reset Crop ---
 
+// --- Function to handle Apply Crop to All Frames ---
+const handleApplyCropToAll = async () => {
+  console.log("[FrameEditor] projectOriginalFramePaths.value before applyGlobalCrop:", props.projectOriginalFramePaths.value);
+  if (!cropRect.value.hasSelection || cropRect.value.size <= 0) {
+    // Use the new prop function to update the message in App.vue
+    if (props.updateAppProcessingMessage) { 
+        props.updateAppProcessingMessage("请先选择一个有效的裁剪区域。注意：裁剪尺寸必须大于0像素。");
+    }
+    return;
+  }
+
+  const cropParams = {
+    x: cropRect.value.x,
+    y: cropRect.value.y,
+    size: cropRect.value.size,
+  };
+
+  console.log("[FrameEditor] Applying crop to all frames with params:", cropParams);
+  await applyGlobalCrop(cropParams); // This will update the global processing message
+  
+  // After applying globally, it's good practice to reset the local crop selection
+  handleResetCrop(); 
+  
+  // Optionally, emit an event to notify App.vue that the operation is done
+  // so App.vue can decide to close the editor, etc.
+  // emit('apply-crop-to-all-frames-done'); // Or just rely on App.vue watching extractedFrames
+
+  // For now, let's assume App.vue will handle UI changes based on processingMessage
+  // or by watching extractedFrames. FrameEditor itself doesn't need to close immediately
+  // unless instructed. However, since the current frame will be re-rendered due to
+  // extractedFrames changing, the displayed image will update.
+  // A common UX might be to close the editor or signal completion clearly.
+  // Let's emit cancel-edit to close the editor after global crop
+  emit('cancel-edit');
+
+};
+// --- End Function to handle Apply Crop to All Frames ---
+
 const saveChanges = () => {
   if (!canvasRef.value || !props.frameToEdit) return;
   const imageDataUrl = canvasRef.value.toDataURL('image/png'); // Or appropriate format
@@ -257,8 +337,8 @@ const cancelEdit = () => {
     <div class="editor-controls">
       <button @click="saveChanges">保存更改</button>
       <button @click="cancelEdit">取消</button>
-      <button>应用裁剪</button> <!-- Placeholder -->
-      <button @click="handleResetCrop">重置裁剪</button>
+      <button @click="handleApplyCropToAll" :disabled="isProcessingGlobal">{{ isProcessingGlobal ? '处理中...' : '应用到所有帧' }}</button>
+      <button @click="handleResetCrop" :disabled="isProcessingGlobal">重置裁剪</button>
     </div>
   </div>
 </template>
