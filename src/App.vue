@@ -12,6 +12,9 @@ const extractedFrames = ref([]);
 const processingMessage = ref("");
 const currentFpsForAnimator = ref(10); // To store the FPS that was used for the current extractedFrames
 
+// New ref to store the selected frame range from FrameAnimator
+const selectedFrameRange = ref({ start: 0, end: -1 }); // -1 could mean full range or not yet set
+
 // 移除了 selectedVideoPath, projectName, fps, videoPlayerSrc refs as they are managed by ProjectSetupAndImport
 
 // 这个函数现在由 ProjectSetupAndImport 组件的 'import-ready' 事件触发
@@ -22,6 +25,9 @@ async function handleVideoImportReady(importData) {
   
   // Store the FPS that will be used for processing, to pass to FrameAnimator
   currentFpsForAnimator.value = importData.fps;
+
+  // Reset selected range when new video is processed
+  selectedFrameRange.value = { start: 0, end: -1 }; 
 
   // 调用后端处理
   await processVideoWithBackend(importData.videoPath, importData.projectName, importData.fps);
@@ -43,12 +49,18 @@ async function processVideoWithBackend(videoPath, projectName, fpsValue) {
       // convertFileSrc 现在是从顶部导入的
       extractedFrames.value = framePaths.map(p => convertFileSrc(p)); 
       processingMessage.value = `成功提取 ${framePaths.length} 帧！`;
+      // After extracting frames, if end was -1, set it to actual last index for initial full range indication
+      if (selectedFrameRange.value.end === -1 && extractedFrames.value.length > 0) {
+        selectedFrameRange.value.end = extractedFrames.value.length - 1;
+      }
     } else if (Array.isArray(framePaths) && framePaths.length === 0) {
       extractedFrames.value = [];
       processingMessage.value = "处理成功，但未提取到任何帧。请检查视频内容和FPS设置。";
+      selectedFrameRange.value = { start: 0, end: -1 }; // Reset on no frames
     } else {
       extractedFrames.value = [];
       processingMessage.value = "后端返回了意外的数据格式。";
+      selectedFrameRange.value = { start: 0, end: -1 }; // Reset on error
       console.warn("Unexpected backend response:", framePaths);
     }
 
@@ -56,6 +68,7 @@ async function processVideoWithBackend(videoPath, projectName, fpsValue) {
     console.error("Error calling process_video command:", error);
     extractedFrames.value = []; 
     processingMessage.value = `处理视频失败: ${error}`;
+    selectedFrameRange.value = { start: 0, end: -1 }; // Reset on error
   }
 }
 
@@ -66,10 +79,17 @@ function updateProcessingMessage(message) {
 function handleImportError(errorMessage) {
   processingMessage.value = errorMessage;
   extractedFrames.value = []; // Clear frames on import error
+  selectedFrameRange.value = { start: 0, end: -1 };
 }
 
 // 移除了旧的 isProjectNameValid, selectVideoFile, handleProcessVideo (renamed/refactored)
 // 移除了监听 projectName 的 watch, App.vue now reacts to events from ProjectSetupAndImport
+
+// New method to handle the event from FrameAnimator
+function handleRangeUpdated(payload) {
+  console.log("App.vue received range-updated event with payload:", payload);
+  selectedFrameRange.value = { ...payload }; 
+}
 
 </script>
 
@@ -90,11 +110,13 @@ function handleImportError(errorMessage) {
     <FrameAnimator 
       :frames="extractedFrames" 
       :fps="currentFpsForAnimator" 
+      @range-selected="handleRangeUpdated" 
       v-if="extractedFrames.length > 0"
     />
 
     <FrameThumbnailsGrid 
       :frames="extractedFrames" 
+      :selected-range="selectedFrameRange" 
       v-if="extractedFrames.length > 0"
     />
 
@@ -114,6 +136,13 @@ function handleImportError(errorMessage) {
 
 .processing-status-display p {
     margin: 0; /* Remove default p margin */
+}
+
+/* Dark theme for processing message if needed */
+@media (prefers-color-scheme: dark) {
+  .processing-status-display {
+    color: #f0f0f0; 
+  }
 }
 </style>
 
