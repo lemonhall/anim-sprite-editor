@@ -85,20 +85,103 @@
     ```
     此命令将启动 Vite 前端开发服务器和 Tauri 后端，并自动打开应用程序窗口。
 
-## 项目文件结构简述
+## 项目文件结构与核心组件职责
 
-- `src/`: Vue.js 前端代码。
-    - `App.vue`: 主要的应用组件。
-    - `main.js`: Vue 应用入口。
-- `src-tauri/`: Rust 后端代码。
-    - `src/lib.rs`:主要的 Rust 逻辑，包含 Tauri 命令。
-    - `Cargo.toml`: Rust 项目依赖管理。
-    - `tauri.conf.json`: Tauri 应用配置。
-    - `icons/`: 应用图标。
-    - `projects/`: (此目录在 `.gitignore` 中，用于存放运行时生成的帧文件，不会提交到git)
-- `.gitignore`: 指定 Git忽略的文件和目录。
-- `package.json`: Node.js 项目配置和依赖。
-- `README.md`: 本文档。
+### 整体结构
+
+- **`public/`**: 存放静态资源，例如在 `index.html` 中直接引用的内容。
+- **`src/`**: Vue.js 前端应用的核心代码。
+    - **`assets/`**: 存放前端代码中引用的静态资源，如图片、字体等 (如果需要)。
+    - **`components/`**: 存放 Vue 单文件组件 (SFCs)。
+        - `App.vue`: 应用的主组件，负责整体布局、路由（如果将来引入）、以及核心状态管理或传递。
+        - `ProjectSetupAndImport.vue`: 负责项目名称输入、FPS 设置、视频导入和初步的抽帧触发。
+        - `FrameDisplay.vue`: 负责展示提取出来的帧序列，并提供动画播放功能。
+        - `FrameEditor.vue`: (详细职责见下文) 核心的帧编辑组件，包含画布、工具选择和编辑操作。
+    - **`composables/`**: 存放 Vue 3 的可组合函数 (Composition API)，用于封装和复用有状态逻辑。
+        - `useGlobalImageOperations.js`: (详细职责见下文) 封装全局图像操作逻辑，如对所有帧应用裁剪。
+        - `useFrameCropper.js`: (详细职责见下文) 封装帧的裁剪逻辑。
+        - `useMagicWand.js`: (详细职责见下文) 封装魔术棒工具（背景移除）逻辑。
+    - `main.js`: Vue 应用的入口文件，初始化 Vue 实例并挂载到 DOM。
+    - `utils/` (建议): 将来可以创建此目录存放通用的辅助函数，例如 FFmpeg 路径检查、文件系统交互等。
+- **`src-tauri/`**: Rust 后端代码，处理与操作系统交互、文件系统操作、以及执行如 FFmpeg 等外部命令。
+    - `src/main.rs` (或 `lib.rs`): 主要的 Rust 逻辑，包含 Tauri 命令定义 (`#[tauri::command]`)。
+    - `Cargo.toml`: Rust 项目的依赖配置文件。
+    - `tauri.conf.json`: Tauri 应用的配置文件，包括窗口设置、权限、插件等。
+    - `icons/`: 应用的图标文件。
+    - `projects/`: (此目录在 `.gitignore` 中) 运行时由应用创建，用于存放用户项目（如提取的帧图片）。
+- **`.github/workflows/`** (如果使用 GitHub Actions): CI/CD 配置文件。
+- **`.gitignore`**: 指定 Git 在提交时应忽略的文件和目录。
+- **`index.html`**: Web 应用的入口 HTML 文件。
+- **`package.json`**: Node.js 项目元数据和依赖管理文件 (npm/yarn/pnpm)。
+- **`README.md`**: (本文档) 项目介绍、设置指南、开发文档等。
+- **`vite.config.js`**: Vite 构建工具的配置文件。
+
+### 核心组件与可组合函数职责
+
+1.  **`src/components/FrameEditor.vue`**:
+    *   **职责**: 提供单帧图像的编辑界面和交互逻辑。
+    *   **主要功能**:
+        *   加载并显示待编辑的帧图像到 HTML5 Canvas 上。
+        *   管理当前激活的编辑工具（如裁剪工具、魔术棒工具）。
+        *   根据激活的工具，将画布上的鼠标事件（点击、移动、释放）分发给相应的可组合函数处理。
+        *   调用可组合函数提供的激活/停用方法来切换工具状态和更新UI（如光标）。
+        *   提供工具相关的控制UI（如魔术棒的容差滑块）。
+        *   处理编辑结果的保存（更新当前帧）或取消。
+        *   调用全局操作（如"应用裁剪到所有帧"）。
+        *   在魔术棒等工具修改画布后，负责将画布内容更新为新的基础图像 (`originalImageForCropping`)，以便后续操作基于此修改。
+
+2.  **`src/composables/useFrameCropper.js`**:
+    *   **职责**: 封装帧图像的裁剪逻辑。
+    *   **主要功能**:
+        *   管理裁剪框的状态（位置 `x`, `y`, 大小 `size`, 是否正在选择 `isSelecting`, 是否有有效选区 `hasSelection`）。
+        *   提供处理画布鼠标事件的方法 (`handleMouseDown`, `handleMouseMove`, `handleMouseUpOrLeave`) 来创建和调整裁剪框。
+        *   计算鼠标在画布上的精确位置。
+        *   提供 `drawCropSelection` 方法，在给定的 CanvasRenderingContext2D 上绘制裁剪框的视觉反馈（虚线框）。
+        *   提供 `resetCrop` 方法来清除当前的裁剪选区。
+        *   提供 `activate` 和 `deactivate` 方法来控制该工具是否响应事件及设置画布光标。
+        *   通过回调函数通知父组件 (`FrameEditor.vue`) 需要重绘画布以更新裁剪框显示。
+        *   监听原始图像变化，并在图像变化时重置裁剪状态。
+
+3.  **`src/composables/useMagicWand.js`**:
+    *   **职责**: 封装魔术棒工具的逻辑，用于基于颜色容差选择并清除区域（例如移除背景）。
+    *   **主要功能**:
+        *   管理工具激活状态 (`isToolActive`) 和颜色容差 (`tolerance`)。
+        *   提供 `activate` 和 `deactivate` 方法控制工具状态和画布光标。
+        *   核心 `execute(startX, startY)` 方法：
+            *   获取画布指定点的颜色作为目标颜色。
+            *   使用 `getImageData` 获取画布像素数据。
+            *   通过广度优先搜索 (BFS) 或类似算法遍历相邻像素。
+            *   对颜色与目标颜色相似（在指定容差内）的像素，将其透明度 (alpha通道) 设置为 0。
+            *   使用 `putImageData` 将修改后的像素数据写回画布。
+            *   通过回调函数通知 `FrameEditor.vue` 画布内容已更改，需要更新其基础图像。
+        *   提供 `setTolerance` 方法来调整颜色匹配的容差。
+        *   包含颜色比较的辅助函数 (例如基于曼哈顿距离)。
+
+4.  **`src/composables/useGlobalImageOperations.js`**:
+    *   **职责**: 封装应用于项目中所有（或多个）帧的批量图像处理操作。
+    *   **主要功能**:
+        *   当前主要实现 `applyGlobalCrop`：
+            *   接收裁剪参数 (`x`, `y`, `width`, `height`)。
+            *   接收项目所有原始帧的文件路径列表和提取帧的 (可能是 `asset://`) URL 列表。
+            *   调用 Tauri 后端命令 (例如 `apply_crop_to_files`)，传递裁剪参数和文件路径给 Rust 端。
+            *   Rust 端负责使用这些参数对每个原始图像文件执行裁剪操作（可能通过 FFmpeg 或图像处理库），并覆盖原文件或保存到新位置。
+        *   管理操作过程中的加载状态 (`isProcessingGlobal`)。
+        *   通过 `updateAppProcessingMessage` 回调更新应用级别的状态消息。
+
+### 数据流与状态管理 (简化)
+
+- **用户交互**: 主要发生在 `ProjectSetupAndImport.vue` (项目设置和导入) 和 `FrameEditor.vue` (帧编辑)。
+- **核心数据**:
+    - 原始视频文件路径: 由用户通过文件对话框选择。
+    - 项目名称、FPS: 用户输入。
+    - 提取的帧列表 (`extractedFrames`): 由 `App.vue` 管理，在抽帧或全局操作后更新。这些通常是 `asset://` 协议的 URL，由 Tauri 的 `convertFileSrc` 生成，用于在前端显示本地文件。
+    - 原始帧文件路径列表 (`projectOriginalFramePaths`): 由 `App.vue` 管理，传递给需要直接操作文件的可组合函数 (如 `useGlobalImageOperations`)。
+    - 当前编辑的帧 (`frameToEdit`): 由 `App.vue` 传递给 `FrameEditor.vue`。
+- **状态更新与通信**:
+    - **Props**: 父组件向子组件传递数据和回调函数。
+    - **Emits**: 子组件向父组件发送事件以通知状态变化或请求操作。
+    - **Composables**: 封装特定功能的逻辑和状态，供组件注入和使用。可组合函数内部通常使用 `ref` 和 `reactive` 创建响应式状态，并通过返回函数来暴露操作。
+    - **Tauri Commands (`invoke`)**: 前端 Vue 组件/可组合函数调用 Rust 后端函数，执行文件操作、系统调用等。
 
 ## 推荐的 IDE 设置
 

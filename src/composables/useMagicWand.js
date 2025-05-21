@@ -2,7 +2,7 @@ import { ref } from 'vue';
 
 export default function useMagicWand(canvasRef, ctxRef, redrawCallback) {
   const isToolActive = ref(false);
-  const tolerance = ref(30); // Default tolerance (0-255 range for color difference)
+  const tolerance = ref(220); // Default tolerance, changed to 220
 
   const activate = () => {
     isToolActive.value = true;
