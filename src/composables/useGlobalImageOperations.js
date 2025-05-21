@@ -6,19 +6,10 @@ export default function useGlobalImageOperations(projectManagementRefs, messageU
   try {
     console.log("[useGlobalOps] Received projectManagementRefs (raw object):", projectManagementRefs);
     if (projectManagementRefs) {
-      console.log("[useGlobalOps] projectManagementRefs.originalFrameFilePaths (raw):", projectManagementRefs.originalFrameFilePaths);
-      if (projectManagementRefs.originalFrameFilePaths) {
-        console.log("[useGlobalOps] projectManagementRefs.originalFrameFilePaths.value (attempting .value access):", projectManagementRefs.originalFrameFilePaths.value);
-        console.log("[useGlobalOps] Array.isArray(projectManagementRefs.originalFrameFilePaths.value):", Array.isArray(projectManagementRefs.originalFrameFilePaths.value));
-      } else {
-        console.log("[useGlobalOps] projectManagementRefs.originalFrameFilePaths is falsy.");
-      }
-      console.log("[useGlobalOps] projectManagementRefs.extractedFrames (raw):", projectManagementRefs.extractedFrames);
-      if (projectManagementRefs.extractedFrames) {
-        console.log("[useGlobalOps] projectManagementRefs.extractedFrames.value (attempting .value access):", projectManagementRefs.extractedFrames.value);
-      } else {
-        console.log("[useGlobalOps] projectManagementRefs.extractedFrames is falsy.");
-      }
+      console.log("[useGlobalOps] projectManagementRefs.originalFrameFilePaths (raw, should be array):", projectManagementRefs.originalFrameFilePaths);
+      console.log("[useGlobalOps] Array.isArray(projectManagementRefs.originalFrameFilePaths):", Array.isArray(projectManagementRefs.originalFrameFilePaths));
+      console.log("[useGlobalOps] projectManagementRefs.extractedFrames (raw, should be array):", projectManagementRefs.extractedFrames);
+      console.log("[useGlobalOps] Array.isArray(projectManagementRefs.extractedFrames):", Array.isArray(projectManagementRefs.extractedFrames));
     } else {
       console.log("[useGlobalOps] projectManagementRefs is falsy.");
     }
@@ -26,40 +17,40 @@ export default function useGlobalImageOperations(projectManagementRefs, messageU
     console.error("[useGlobalOps] Error during initial logging of projectManagementRefs:", e);
   }
 
-  const { extractedFrames, originalFrameFilePaths } = projectManagementRefs;
+  // These are now expected to be the actual arrays, not refs.
+  const originalFrames = projectManagementRefs.originalFrameFilePaths;
+  const currentExtractedFrames = projectManagementRefs.extractedFrames; // Use for length or initial state if needed
+
   const { initialProcessingMessage, updateProcessingMessage } = messageUpdater;
 
-  const isProcessingGlobal = ref(false); // Local processing state for this composable
+  const isProcessingGlobal = ref(false);
   const localProcessingMessage = ref(initialProcessingMessage);
 
   async function applyGlobalCrop(cropParams) {
-    if (!projectManagementRefs || 
-        !projectManagementRefs.originalFrameFilePaths || 
-        !projectManagementRefs.originalFrameFilePaths.value || 
-        !Array.isArray(projectManagementRefs.originalFrameFilePaths.value) ||
-        projectManagementRefs.originalFrameFilePaths.value.length === 0) {
-      console.warn('[useGlobalImageOperations] applyGlobalCrop: originalFrameFilePaths 无效或为空，无法继续裁剪。', 
-                   projectManagementRefs && projectManagementRefs.originalFrameFilePaths ? projectManagementRefs.originalFrameFilePaths.value : 'projectManagementRefs.originalFrameFilePaths is null/undefined');
+    // Directly use originalFrames (the array)
+    if (!originalFrames || !Array.isArray(originalFrames) || originalFrames.length === 0) {
+      console.warn('[useGlobalImageOperations] applyGlobalCrop: originalFrames 无效或为空，无法继续裁剪。', originalFrames);
       if (messageUpdater && typeof messageUpdater.updateProcessingMessage === 'function') {
         messageUpdater.updateProcessingMessage('错误：没有可用于裁剪的原始帧路径。');
       }
       isProcessingGlobal.value = false;
-      return;
+      return null; // Indicate failure or no operation
     }
-    if (!projectManagementRefs.extractedFrames || !projectManagementRefs.extractedFrames.value) {
-        console.warn('[useGlobalImageOperations] applyGlobalCrop: extractedFrames ref 无效，无法更新预览。');
-        // 即使 extractedFrames 无效，仍然尝试处理原始文件，但会发出警告
+    // currentExtractedFrames is also an array, not a ref.
+    if (!currentExtractedFrames || !Array.isArray(currentExtractedFrames)) {
+        console.warn('[useGlobalImageOperations] applyGlobalCrop: currentExtractedFrames 数组无效。');
+        // Decide if this is a critical error or if we can proceed with originalFrames only
     }
 
     isProcessingGlobal.value = true;
     if (messageUpdater && typeof messageUpdater.updateProcessingMessage === 'function') {
-      messageUpdater.updateProcessingMessage(`正在对 ${projectManagementRefs.originalFrameFilePaths.value.length} 帧应用全局裁剪...`);
+      messageUpdater.updateProcessingMessage(`正在对 ${originalFrames.length} 帧应用全局裁剪...`);
     } else {
       console.log(`[useGlobalImageOperations] messageUpdater 或 updateProcessingMessage 不可用。`);
     }
     
-    const localOriginalPaths = [...projectManagementRefs.originalFrameFilePaths.value]; // 创建副本以防万一
-    const newExtractedFrames = [];
+    const localOriginalPaths = [...originalFrames]; // Create a copy of the array
+    const newExtractedFramesOutput = [];
     let processedCount = 0;
 
     console.log(`[useGlobalImageOperations] 开始处理 ${localOriginalPaths.length} 帧的全局裁剪。裁剪参数:`, cropParams);
@@ -68,7 +59,7 @@ export default function useGlobalImageOperations(projectManagementRefs, messageU
       for (const originalPath of localOriginalPaths) {
         if (!originalPath || typeof originalPath !== 'string') {
           console.warn('[useGlobalImageOperations] 跳过无效的原始路径:', originalPath);
-          newExtractedFrames.push(''); // 保留占位符或错误指示
+          newExtractedFramesOutput.push(''); 
           processedCount++;
           if (messageUpdater && typeof messageUpdater.updateProcessingMessage === 'function') {
             messageUpdater.updateProcessingMessage(`全局裁剪：已处理 ${processedCount}/${localOriginalPaths.length} 帧 (跳过一个无效路径)...`);
@@ -77,9 +68,8 @@ export default function useGlobalImageOperations(projectManagementRefs, messageU
         }
         try {
           const image = new Image();
-          image.crossOrigin = "Anonymous"; // 如果图像来自不同源，可能需要
+          image.crossOrigin = "Anonymous"; 
           
-          // 使用 convertFileSrc 确保路径对 Image.src 有效
           const srcPathForImage = convertFileSrc(originalPath);
           console.log(`[useGlobalImageOperations] 正在加载图像: ${originalPath} (转换后: ${srcPathForImage})`);
 
@@ -104,14 +94,14 @@ export default function useGlobalImageOperations(projectManagementRefs, messageU
 
               ctx.drawImage(
                 image,
-                cropParams.x, // 源 x
-                cropParams.y, // 源 y
-                cropParams.width, // 源宽度
-                cropParams.height, // 源高度
-                0, // 目标 x
-                0, // 目标 y
-                cropParams.width, // 目标宽度
-                cropParams.height // 目标高度
+                cropParams.x, 
+                cropParams.y, 
+                cropParams.width, 
+                cropParams.height, 
+                0, 
+                0, 
+                cropParams.width, 
+                cropParams.height 
               );
               resolve(tempCanvas.toDataURL('image/png'));
             };
@@ -121,10 +111,10 @@ export default function useGlobalImageOperations(projectManagementRefs, messageU
             };
             image.src = srcPathForImage;
           });
-          newExtractedFrames.push(dataUrl);
+          newExtractedFramesOutput.push(dataUrl);
         } catch (err) {
           console.error(`[useGlobalImageOperations] 处理单帧 ${originalPath} 时出错:`, err);
-          newExtractedFrames.push(''); // 如果单帧处理失败，添加空字符串或错误占位符
+          newExtractedFramesOutput.push(''); 
         }
         processedCount++;
         if (messageUpdater && typeof messageUpdater.updateProcessingMessage === 'function') {
@@ -132,30 +122,28 @@ export default function useGlobalImageOperations(projectManagementRefs, messageU
         }
       }
 
-      if (projectManagementRefs.extractedFrames && projectManagementRefs.extractedFrames.value) {
-        projectManagementRefs.extractedFrames.value = newExtractedFrames;
-        console.log('[useGlobalImageOperations] projectManagementRefs.extractedFrames 已更新。');
-      } else {
-        console.warn('[useGlobalImageOperations] projectManagementRefs.extractedFrames ref 无效，无法更新预览数组。');
-      }
-      
+      // Return the newly created array of data URLs
       if (messageUpdater && typeof messageUpdater.updateProcessingMessage === 'function') {
         messageUpdater.updateProcessingMessage(`所有 ${localOriginalPaths.length} 帧已成功应用全局裁剪！`);
       }
+      console.log('[useGlobalImageOperations] 全局裁剪处理完成，返回新的帧数组。');
+      return newExtractedFramesOutput;
+
     } catch (error) {
       console.error('[useGlobalImageOperations] applyGlobalCrop 函数主循环出错:', error);
       if (messageUpdater && typeof messageUpdater.updateProcessingMessage === 'function') {
         messageUpdater.updateProcessingMessage(`应用全局裁剪时发生错误: ${error.message || String(error)}`);
       }
+      return null; // Indicate failure
     } finally {
       isProcessingGlobal.value = false;
-      console.log('[useGlobalImageOperations] 全局裁剪处理完成。');
+      // Removed console.log from here as it's better after return or in calling function
     }
   }
 
   return {
     isProcessingGlobal,
     applyGlobalCrop,
-    localProcessingMessage // Expose if needed by the component using this composable
+    localProcessingMessage
   };
 } 

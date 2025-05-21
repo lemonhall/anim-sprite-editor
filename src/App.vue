@@ -157,6 +157,25 @@ function handleCancelEdit() {
   cancelFrameEdit();
 }
 
+function handleFramesGloballyUpdated(newFrames) {
+  console.log("[App.vue] Frames Globally Updated. New data length:", newFrames ? newFrames.length : 'null/undefined');
+  if (newFrames && Array.isArray(newFrames)) {
+    extractedFrames.value = newFrames;
+    // Optionally, re-initialize animator or parts of it if totalFrames changed implicitly
+    // initializeAnimatorOnNewVideo(newFrames.length, currentExtractionFps.value);
+    // However, totalFrames in useAnimatorSettings might still be the old one unless also updated.
+    // For now, just updating the visual frames.
+    processingMessage.value = "所有帧已更新并应用了全局操作。";
+  } else {
+    console.warn("[App.vue] Received invalid data for global frames update.");
+    processingMessage.value = "全局帧更新失败：数据无效。";
+  }
+  // Typically, after a global operation that updates all frames, the editor might be closed.
+  if (frameBeingEdited.value) {
+    cancelFrameEdit(); // Close the editor
+  }
+}
+
 </script>
 
 <template>
@@ -169,6 +188,10 @@ function handleCancelEdit() {
       :latest-animator-settings="animatorSettingsForSave" 
       :initial-project-name="currentProjectName" 
       :initial-extraction-fps="currentExtractionFps"
+      :project-original-frame-paths="originalFrameFilePaths"
+      :processing-message-string="processingMessage.value" 
+      :update-app-processing-message="updateAppProcessingMessage"
+      @frames-globally-updated="handleFramesGloballyUpdated" 
     />
 
     <div class="row processing-status-display" v-if="processingMessage">

@@ -32,7 +32,7 @@ console.log("[FrameEditor] Initial props.projectOriginalFramePaths.value:", prop
 console.log("[FrameEditor] Initial props.projectExtractedFrames:", props.projectExtractedFrames);
 console.log("[FrameEditor] Initial props.projectExtractedFrames.value:", props.projectExtractedFrames ? props.projectExtractedFrames.value : 'props.projectExtractedFrames is falsy');
 
-const emit = defineEmits(['update-frame', 'cancel-edit']); // Removed 'apply-crop-to-all-frames' as it's handled internally now
+const emit = defineEmits(['update-frame', 'cancel-edit', 'frames-globally-updated']);
 
 const canvasRef = ref(null);
 const ctx = ref(null);
@@ -273,40 +273,38 @@ const handleResetCrop = () => {
 // --- End Function to handle Reset Crop ---
 
 // --- Function to handle Apply Crop to All Frames ---
-const handleApplyCropToAll = async () => {
-  console.log("[FrameEditor] projectOriginalFramePaths.value before applyGlobalCrop:", props.projectOriginalFramePaths.value);
+const handleApplyCropToAllFrames = async () => {
   if (!cropRect.value.hasSelection || cropRect.value.size <= 0) {
-    // Use the new prop function to update the message in App.vue
-    if (props.updateAppProcessingMessage) { 
-        props.updateAppProcessingMessage("请先选择一个有效的裁剪区域。注意：裁剪尺寸必须大于0像素。");
-    }
+    props.updateAppProcessingMessage("请先在当前帧上选择一个裁剪区域。");
     return;
   }
 
-  const cropParams = {
+  console.log("[FrameEditor] projectOriginalFramePaths.value before applyGlobalCrop:", props.projectOriginalFramePaths);
+
+  const cropParamsToApply = {
     x: cropRect.value.x,
     y: cropRect.value.y,
-    size: cropRect.value.size,
+    width: cropRect.value.size,
+    height: cropRect.value.size, // Assuming square crop
   };
 
-  console.log("[FrameEditor] Applying crop to all frames with params:", cropParams);
-  await applyGlobalCrop(cropParams); // This will update the global processing message
+  props.updateAppProcessingMessage("正在应用全局裁剪...");
+  console.log("[FrameEditor] Applying crop to all frames with params:", cropParamsToApply);
   
-  // After applying globally, it's good practice to reset the local crop selection
-  handleResetCrop(); 
-  
-  // Optionally, emit an event to notify App.vue that the operation is done
-  // so App.vue can decide to close the editor, etc.
-  // emit('apply-crop-to-all-frames-done'); // Or just rely on App.vue watching extractedFrames
+  // applyGlobalCrop now returns the new array of frames or null
+  const newFramesArray = await applyGlobalCrop(cropParamsToApply);
 
-  // For now, let's assume App.vue will handle UI changes based on processingMessage
-  // or by watching extractedFrames. FrameEditor itself doesn't need to close immediately
-  // unless instructed. However, since the current frame will be re-rendered due to
-  // extractedFrames changing, the displayed image will update.
-  // A common UX might be to close the editor or signal completion clearly.
-  // Let's emit cancel-edit to close the editor after global crop
-  emit('cancel-edit');
-
+  if (newFramesArray && Array.isArray(newFramesArray)) {
+    console.log("[FrameEditor] Global crop successful. Emitting frames-globally-updated.");
+    emit('frames-globally-updated', newFramesArray);
+    props.updateAppProcessingMessage("全局裁剪已应用！");
+    // Optionally, close the editor or reset the current frame view
+    // emit('cancel-edit'); 
+  } else {
+    console.error("[FrameEditor] Global crop failed or returned no frames.");
+    // The message should have been set by useGlobalImageOperations
+    // props.updateAppProcessingMessage("全局裁剪失败。");
+  }
 };
 // --- End Function to handle Apply Crop to All Frames ---
 
@@ -337,7 +335,7 @@ const cancelEdit = () => {
     <div class="editor-controls">
       <button @click="saveChanges">保存更改</button>
       <button @click="cancelEdit">取消</button>
-      <button @click="handleApplyCropToAll" :disabled="isProcessingGlobal">{{ isProcessingGlobal ? '处理中...' : '应用到所有帧' }}</button>
+      <button @click="handleApplyCropToAllFrames" :disabled="isProcessingGlobal">{{ isProcessingGlobal ? '处理中...' : '应用到所有帧' }}</button>
       <button @click="handleResetCrop" :disabled="isProcessingGlobal">重置裁剪</button>
     </div>
   </div>
