@@ -62,15 +62,32 @@ const {
 } = useMagicWand(canvasRef, ctx, () => updateBaseImageAfterCanvasChange('magicWand'));
 
 const setActiveTool = (toolName) => {
-  if (activeTool.value === toolName) return;
+  console.log(`[FrameEditor] setActiveTool called with: ${toolName}. Current activeTool: ${activeTool.value}`);
+  
+  const previousTool = activeTool.value;
 
-  if (activeTool.value === 'crop') deactivateCropTool();
-  else if (activeTool.value === 'magicWand') deactivateMagicWandTool();
+  // If the tool is not changing, but we want to ensure it's properly activated (e.g., after image load)
+  // we still proceed to activate it. Only deactivate if the tool is actually different.
+  if (previousTool === 'crop' && previousTool !== toolName) {
+    console.log("[FrameEditor] Deactivating previous crop tool.");
+    deactivateCropTool();
+  } else if (previousTool === 'magicWand' && previousTool !== toolName) {
+    console.log("[FrameEditor] Deactivating previous magic wand tool.");
+    deactivateMagicWandTool();
+  }
 
   activeTool.value = toolName;
+  console.log(`[FrameEditor] activeTool is now: ${activeTool.value}`);
 
-  if (toolName === 'crop') activateCropTool();
-  else if (toolName === 'magicWand') activateMagicWandTool();
+  // Always call the activate function for the target tool
+  if (toolName === 'crop') {
+    console.log("[FrameEditor] Ensuring crop tool is active.");
+    activateCropTool();
+  } else if (toolName === 'magicWand') {
+    console.log("[FrameEditor] Ensuring magic wand tool is active.");
+    activateMagicWandTool();
+  }
+  console.log("[FrameEditor] setActiveTool finished.");
 };
 
 const redrawCanvas = () => {
@@ -83,10 +100,8 @@ const redrawCanvas = () => {
   context.clearRect(0, 0, canvas.width, canvas.height);
   context.drawImage(originalImageForCropping.value, 0, 0, canvas.width, canvas.height);
   
-  if (activeTool.value === 'crop' && cropRect.value.hasSelection) {
+  if (activeTool.value === 'crop' && (cropRect.value.isSelecting || cropRect.value.hasSelection)) {
      drawCropSelection(context);
-  } else if (activeTool.value === 'crop' && cropRect.value.isSelecting) {
-     drawCropSelection(context); // also draw if currently selecting
   }
 };
 
@@ -104,6 +119,7 @@ const drawImageOnCanvas = async () => {
       canvasRef.value.width = img.naturalWidth;
       canvasRef.value.height = img.naturalHeight;
       await nextTick();
+      console.log("[FrameEditor] New image loaded, setting active tool to 'crop'.");
       setActiveTool('crop'); 
       redrawCanvas();
     }
@@ -129,6 +145,7 @@ watch(() => props.frameToEdit, () => {
 }, { deep: true });
 
 const handleCanvasMouseDown = (event) => {
+  console.log(`[FrameEditor] handleCanvasMouseDown. Active tool: ${activeTool.value}`);
   if (activeTool.value === 'crop') {
     cropperMouseDown(event);
   } else if (activeTool.value === 'magicWand') {
@@ -139,6 +156,45 @@ const handleCanvasMouseDown = (event) => {
     const x = (event.clientX - rect.left) * scaleX;
     const y = (event.clientY - rect.top) * scaleY;
     executeMagicWand(Math.round(x), Math.round(y));
+  }
+};
+
+// New wrapper for mousemove
+const handleCanvasMouseMove = (event) => {
+  // console.log(`[FrameEditor] handleCanvasMouseMove. Active tool: ${activeTool.value}`); // Basic log
+  if (activeTool.value === 'crop') {
+    if (typeof cropperMouseMove === 'function') {
+        // console.log("[FrameEditor] Forwarding mousemove to cropperMouseMove"); // Verbose log
+        cropperMouseMove(event);
+    } else {
+        console.error("[FrameEditor] cropperMouseMove is not defined or not a function!");
+    }
+  }
+};
+
+// New wrapper for mouseup
+const handleCanvasMouseUp = (event) => {
+  console.log(`[FrameEditor] handleCanvasMouseUp. Active tool: ${activeTool.value}`);
+  if (activeTool.value === 'crop') {
+    if (typeof cropperMouseUpOrLeave === 'function') {
+      console.log("[FrameEditor] Forwarding mouseup to cropperMouseUpOrLeave");
+      cropperMouseUpOrLeave(event); // Pass event if the composable uses it
+    } else {
+      console.error("[FrameEditor] cropperMouseUpOrLeave is not defined or not a function for mouseup!");
+    }
+  }
+};
+
+// New wrapper for mouseleave
+const handleCanvasMouseLeave = (event) => {
+  console.log(`[FrameEditor] handleCanvasMouseLeave. Active tool: ${activeTool.value}`);
+  if (activeTool.value === 'crop') {
+    if (typeof cropperMouseUpOrLeave === 'function') {
+      console.log("[FrameEditor] Forwarding mouseleave to cropperMouseUpOrLeave");
+      cropperMouseUpOrLeave(event); // Pass event if the composable uses it
+    } else {
+      console.error("[FrameEditor] cropperMouseUpOrLeave is not defined or not a function for mouseleave!");
+    }
   }
 };
 
@@ -181,9 +237,9 @@ const cancelEdit = () => emit('cancel-edit');
       ref="canvasRef" 
       class="editor-canvas" 
       @mousedown="handleCanvasMouseDown" 
-      @mousemove="activeTool === 'crop' ? cropperMouseMove : null" 
-      @mouseup="activeTool === 'crop' ? cropperMouseUpOrLeave : null" 
-      @mouseleave="activeTool === 'crop' ? cropperMouseUpOrLeave : null"
+      @mousemove="handleCanvasMouseMove" 
+      @mouseup="handleCanvasMouseUp" 
+      @mouseleave="handleCanvasMouseLeave"
     ></canvas>
     <div class="editor-tool-selector">
       <button @click="setActiveTool('crop')" :class="{active: activeTool === 'crop'}">裁剪</button>

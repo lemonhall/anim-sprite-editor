@@ -90,15 +90,21 @@ export default function useFrameCropper(canvasRef, originalImage, redrawCanvasCa
   };
 
   const handleMouseUpOrLeave = () => {
-    console.log("[useFrameCropper] handleMouseUpOrLeave. isToolActive:", isToolActive.value, "isSelecting:", cropRect.value.isSelecting);
-    if (!isToolActive.value || !cropRect.value.isSelecting) return;
-    cropRect.value.isSelecting = false;
-    if (cropRect.value.size > 5) {
-      cropRect.value.hasSelection = true;
-    } else {
-      cropRect.value.hasSelection = false;
-      cropRect.value.size = 0;
+    console.log("[useFrameCropper] handleMouseUpOrLeave triggered. isToolActive:", isToolActive.value, "Current isSelecting before logic:", cropRect.value.isSelecting);
+    if (!isToolActive.value || !cropRect.value.isSelecting) {
+      console.log("[useFrameCropper] handleMouseUpOrLeave returning early. Conditions not met (tool active/is selecting).");
+      return;
     }
+    cropRect.value.isSelecting = false;
+    if (cropRect.value.size > 5) { 
+      cropRect.value.hasSelection = true;
+      console.log("[useFrameCropper] Valid selection made. size:", cropRect.value.size);
+    } else {
+      cropRect.value.hasSelection = false; 
+      cropRect.value.size = 0; 
+      console.log("[useFrameCropper] Selection too small or invalid, reset. size:", cropRect.value.size);
+    }
+    console.log("[useFrameCropper] handleMouseUpOrLeave finished. isToolActive:", isToolActive.value, "New isSelecting:", cropRect.value.isSelecting, "hasSelection:", cropRect.value.hasSelection);
     if (redrawCanvasCallback) redrawCanvasCallback();
   };
 
@@ -115,10 +121,27 @@ export default function useFrameCropper(canvasRef, originalImage, redrawCanvasCa
   };
 
   const drawCropSelection = (context) => {
-    if (!originalImage.value || !(cropRect.value.isSelecting || cropRect.value.hasSelection) || cropRect.value.size <= 0) {
+    console.log("[useFrameCropper] drawCropSelection called. isToolActive:", isToolActive.value, "cropRect:", JSON.parse(JSON.stringify(cropRect.value)));
+
+    // Condition to draw: tool must be active AND (either selecting OR has a selection)
+    // The size check was too restrictive for the initial mousedown event.
+    if (!isToolActive.value || !(cropRect.value.isSelecting || cropRect.value.hasSelection)) {
+      console.log("[useFrameCropper] drawCropSelection returning early. Conditions not met. isToolActive:", isToolActive.value, "isSelecting:", cropRect.value.isSelecting, "hasSelection:", cropRect.value.hasSelection);
       return;
     }
-    if (!canvasRef.value || !context) return;
+    
+    // Also, if there's a selection but size is zero (e.g. after a reset or failed selection), don't draw.
+    // This is mostly for hasSelection case. If isSelecting, even a zero size might be okay to start with (though invisible).
+    // However, strokeRect with 0 size is a no-op anyway.
+    if (cropRect.value.size <= 0 && !cropRect.value.isSelecting) { // If hasSelection is true but size is 0, or just no valid rect.
+        console.log("[useFrameCropper] drawCropSelection: size is 0 and not actively selecting, returning.");
+        return;
+    }
+
+    if (!canvasRef.value || !context) {
+        console.warn("[useFrameCropper] drawCropSelection: canvasRef or context is null.");
+        return;
+    }
 
     context.strokeStyle = 'rgba(0, 0, 255, 0.7)';
     context.lineWidth = 2;
