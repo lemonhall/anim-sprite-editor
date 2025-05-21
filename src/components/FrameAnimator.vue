@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount, defineEmits } from 'vue';
+import { ref, watch, onMounted, onBeforeUnmount, defineEmits, computed } from 'vue';
 
 const props = defineProps({
   frames: {
@@ -19,21 +19,66 @@ const emit = defineEmits(['range-selected']);
 const isPlaying = ref(false);
 const animationTimerId = ref(null);
 const currentFrameSrc = ref('');
-const currentFrameIndex = ref(0);
+const currentFrameDisplayIndex = ref(0);
 
 const inputStartIndex = ref(0);
 const inputEndIndex = ref(null);
 
+// Internal state for the actual playback range
+const actualPlaybackStartIndex = ref(0);
+const actualPlaybackEndIndex = ref(0);
+
+// Computed property for the length of the current animation sequence
+const currentSequenceLength = computed(() => {
+  if (!props.frames || props.frames.length === 0 || actualPlaybackEndIndex.value < actualPlaybackStartIndex.value) {
+    return 0;
+  }
+  return actualPlaybackEndIndex.value - actualPlaybackStartIndex.value + 1;
+});
+
+function resetAnimationToCurrentRangeStart() {
+  stopAnimation();
+  if (props.frames.length > 0 && 
+      actualPlaybackStartIndex.value >= 0 && 
+      actualPlaybackStartIndex.value < props.frames.length &&
+      actualPlaybackStartIndex.value <= actualPlaybackEndIndex.value) {
+    currentFrameDisplayIndex.value = actualPlaybackStartIndex.value;
+    currentFrameSrc.value = props.frames[currentFrameDisplayIndex.value];
+  } else if (props.frames.length > 0) { // Fallback to first frame if range is weird but frames exist
+    currentFrameDisplayIndex.value = 0;
+    currentFrameSrc.value = props.frames[0];
+  } else {
+    currentFrameSrc.value = ''; // No frames, clear image
+    currentFrameDisplayIndex.value = 0;
+  }
+}
+
 function playAnimation() {
-  if (props.frames.length === 0 || props.fps <= 0) return;
+  if (currentSequenceLength.value <= 0 || props.fps <= 0) {
+    stopAnimation(); // Ensure it's stopped if conditions aren't met
+    return;
+  }
   
   isPlaying.value = true;
   if (animationTimerId.value) {
     clearInterval(animationTimerId.value);
   }
+
+  // Ensure currentFrameDisplayIndex is within the current playback range before starting
+  if (currentFrameDisplayIndex.value < actualPlaybackStartIndex.value || 
+      currentFrameDisplayIndex.value > actualPlaybackEndIndex.value) {
+    currentFrameDisplayIndex.value = actualPlaybackStartIndex.value;
+  }
+  // Update src just in case it wasn't set by the above, or if it's the first play
+  if (currentFrameDisplayIndex.value >=0 && currentFrameDisplayIndex.value < props.frames.length) {
+      currentFrameSrc.value = props.frames[currentFrameDisplayIndex.value];
+  }
+
   animationTimerId.value = setInterval(() => {
-    currentFrameIndex.value = (currentFrameIndex.value + 1) % props.frames.length;
-    currentFrameSrc.value = props.frames[currentFrameIndex.value];
+    let positionInSequence = currentFrameDisplayIndex.value - actualPlaybackStartIndex.value;
+    positionInSequence = (positionInSequence + 1) % currentSequenceLength.value;
+    currentFrameDisplayIndex.value = actualPlaybackStartIndex.value + positionInSequence;
+    currentFrameSrc.value = props.frames[currentFrameDisplayIndex.value];
   }, 1000 / props.fps);
 }
 
@@ -46,59 +91,85 @@ function stopAnimation() {
 }
 
 function togglePlayAnimation() {
-  if (props.frames.length === 0) return;
+  if (currentSequenceLength.value === 0) return; // Can't play if no valid sequence
+
   if (isPlaying.value) {
     stopAnimation();
   } else {
-    if (!currentFrameSrc.value && props.frames.length > 0) {
-      currentFrameIndex.value = 0;
-      currentFrameSrc.value = props.frames[currentFrameIndex.value];
+    // If current display is outside new range, or no src, reset to start of current range
+    if (currentFrameDisplayIndex.value < actualPlaybackStartIndex.value || 
+        currentFrameDisplayIndex.value > actualPlaybackEndIndex.value || 
+        !currentFrameSrc.value) {
+      if (actualPlaybackStartIndex.value >= 0 && actualPlaybackStartIndex.value < props.frames.length) {
+        currentFrameDisplayIndex.value = actualPlaybackStartIndex.value; 
+        currentFrameSrc.value = props.frames[currentFrameDisplayIndex.value];
+      } else {
+        return; // Cannot start if actualPlaybackStartIndex is invalid
+      }
     }
     playAnimation();
   }
 }
 
 function handleSetRange() {
-  const start = Math.max(0, Number(inputStartIndex.value) || 0);
-  let end = inputEndIndex.value === null || inputEndIndex.value === '' ? null : Number(inputEndIndex.value);
+  const newStartInput = Number(inputStartIndex.value) || 0;
+  const newEndInput = inputEndIndex.value; // Can be null, empty, or number
 
-  if (end !== null && end < start) {
-    end = start; 
-  }
-  if (props.frames.length > 0) {
-      const maxIndex = props.frames.length - 1;
-      if (end !== null && end > maxIndex) {
-          end = maxIndex;
-      }
-      if (start > maxIndex) {
-      }
-  } else if (end !== null) {
-      end = null;
+  let finalStart = Math.max(0, newStartInput);
+  let finalEnd;
+
+  if (props.frames.length === 0) {
+    actualPlaybackStartIndex.value = 0;
+    actualPlaybackEndIndex.value = 0;
+    resetAnimationToCurrentRangeStart(); 
+    emit('range-selected', { start: 0, end: 0 });
+    return;
   }
 
-  emit('range-selected', { 
-    start: start, 
-    end: end === null ? props.frames.length - 1 : end
-  });
-  console.log(`FrameAnimator emitted range-selected: Start: ${start}, End: ${end === null ? props.frames.length -1 : end}`);
+  const maxFrameIdx = props.frames.length - 1;
+  finalStart = Math.min(finalStart, maxFrameIdx); // Cannot be more than max index
+
+  if (newEndInput === null || newEndInput === '' || typeof newEndInput !== 'number') {
+    finalEnd = maxFrameIdx; // Default to last frame
+  } else {
+    finalEnd = Number(newEndInput);
+  }
+
+  // Ensure end is not less than start, and not more than max frame index
+  finalEnd = Math.min(Math.max(finalStart, finalEnd), maxFrameIdx);
+  
+  actualPlaybackStartIndex.value = finalStart;
+  actualPlaybackEndIndex.value = finalEnd;
+
+  resetAnimationToCurrentRangeStart(); 
+  emit('range-selected', { start: actualPlaybackStartIndex.value, end: actualPlaybackEndIndex.value });
+  console.log(`FrameAnimator emitted range-selected & set playback range: Start: ${actualPlaybackStartIndex.value}, End: ${actualPlaybackEndIndex.value}`);
 }
+
 
 watch(() => props.frames, (newFrames) => {
   stopAnimation();
-  currentFrameIndex.value = 0;
+  inputStartIndex.value = 0;
+  inputEndIndex.value = null;
+
   if (newFrames && newFrames.length > 0) {
-    currentFrameSrc.value = newFrames[0];
-    inputStartIndex.value = 0;
-    inputEndIndex.value = null;
+    actualPlaybackStartIndex.value = 0;
+    actualPlaybackEndIndex.value = newFrames.length - 1;
+    currentFrameDisplayIndex.value = 0; 
+    currentFrameSrc.value = newFrames[0]; 
   } else {
-    currentFrameSrc.value = '';
+    actualPlaybackStartIndex.value = 0;
+    actualPlaybackEndIndex.value = 0; 
+    currentFrameDisplayIndex.value = 0;
+    currentFrameSrc.value = ''; 
   }
-}, { immediate: true });
+}, { immediate: true }); 
 
 watch(() => props.fps, (newFps) => {
-  if (isPlaying.value && newFps > 0 && props.frames.length > 0) {
+  if (isPlaying.value && newFps > 0 && currentSequenceLength.value > 0) {
+    // No need to reset currentFrameDisplayIndex here, just restart with new speed
     stopAnimation(); 
-    playAnimation();
+    playAnimation(); 
   }
 });
 
@@ -106,18 +177,14 @@ onBeforeUnmount(() => {
   stopAnimation();
 });
 
-onMounted(() => {
-  if (!currentFrameSrc.value && props.frames && props.frames.length > 0) {
-    currentFrameSrc.value = props.frames[0];
-  }
-});
+// onMounted is effectively handled by immediate watch on props.frames
 
 </script>
 
 <template>
   <div class="animation-section-component">
     <div class="animation-controls">
-      <button @click="togglePlayAnimation" :disabled="frames.length === 0">
+      <button @click="togglePlayAnimation" :disabled="currentSequenceLength === 0">
         {{ isPlaying ? '暂停动画' : '播放动画' }}
       </button>
       <span class="fps-display">动画FPS: {{ fps }}</span>
@@ -139,10 +206,10 @@ onMounted(() => {
       <img 
         v-if="currentFrameSrc"
         :src="currentFrameSrc" 
-        alt="动画预览" 
+        :alt="`动画预览帧 ${currentFrameDisplayIndex}`" 
         class="animation-preview-img"
       />
-      <div v-else-if="frames.length > 0" class="placeholder-text">点击播放预览</div>
+      <div v-else-if="frames.length > 0" class="placeholder-text">设置范围并播放</div>
       <div v-else class="placeholder-text">暂无帧可播放</div>
     </div>
   </div>
@@ -270,7 +337,7 @@ onMounted(() => {
     color: #888;
   }
   .set-range-button {
-    border-color: #378CE7;
+    border-color: #378CE7; 
     background-color: #378CE7;
     color: #e0e0e0;
   }
