@@ -27,7 +27,7 @@ const props = defineProps({
   }
 });
 
-const emit = defineEmits(['range-selected', 'playback-settings-changed']); // Added playback-settings-changed
+const emit = defineEmits(['range-selected', 'playback-settings-changed', 'export-frames-requested']); // Added export-frames-requested
 
 const isPlaying = ref(false);
 const animationTimerId = ref(null);
@@ -210,6 +210,19 @@ function emitPlaybackSettingsChanged(){
     console.log("Emitted playback-settings-changed");
 }
 
+// This function should exist if the button is in the template
+function handleExportSelection() {
+  if (currentSequenceLength.value > 0 && props.frames.length > 0) {
+    emit('export-frames-requested', { 
+      startIndex: actualPlaybackStartIndex.value, 
+      endIndex: actualPlaybackEndIndex.value 
+    });
+    console.log(`Export requested for frames from index ${actualPlaybackStartIndex.value} to ${actualPlaybackEndIndex.value}`);
+  } else {
+    console.warn("Export selection called but no valid sequence or frames available.");
+  }
+}
+
 // Watch for new frames (e.g. new video processed)
 watch(() => props.frames, (newFrames) => {
   stopAnimation();
@@ -285,6 +298,17 @@ onBeforeUnmount(() => {
       />
       <div v-else-if="frames.length > 0" class="placeholder-text">设置范围并播放</div>
       <div v-else class="placeholder-text">暂无帧可播放</div>
+    </div>
+    
+    <!-- Ensure this section is present -->
+    <div class="export-controls" style="margin-top: 15px;">
+      <button 
+        @click="handleExportSelection" 
+        :disabled="currentSequenceLength === 0 || frames.length === 0"
+        class="export-button"
+      >
+        导出选定帧到 outputs
+      </button>
     </div>
   </div>
 </template>
@@ -398,6 +422,27 @@ onBeforeUnmount(() => {
   color: #777;
 }
 
+.export-button { /* Style for the new export button */
+  padding: 0.5em 1em;
+  border: 1px solid #007bff;
+  background-color: #007bff;
+  color: white;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.export-button:hover {
+  background-color: #0056b3;
+}
+
+.export-button:disabled {
+  background-color: #cccccc;
+  border-color: #bbbbbb;
+  color: #666666;
+  cursor: not-allowed;
+}
+
 @media (prefers-color-scheme: dark) {
   .animation-section-component {
     background-color: #3a3a3a;
@@ -436,6 +481,19 @@ onBeforeUnmount(() => {
     border-color: #444;
   }
   .placeholder-text {
+    color: #aaa;
+  }
+  .export-button {
+    border-color: #378CE7; /* Using a theme-consistent blue */
+    background-color: #378CE7;
+    color: #e0e0e0;
+  }
+  .export-button:hover {
+    background-color: #2a79c4;
+  }
+  .export-button:disabled {
+    background-color: #555;
+    border-color: #666;
     color: #aaa;
   }
 }

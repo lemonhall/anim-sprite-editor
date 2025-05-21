@@ -60,7 +60,7 @@ export default function useFrameExporter(
                     
                     const editorData = frameEditorRef.value.getCanvasDataAsBase64();
                     if (editorData && editorData.startsWith('data:image/png;base64,')) {
-                        itemToAdd = { type: 'base64', data: editorData, fileName };
+                        itemToAdd = { data: editorData, file_name: fileName };
                         // console.log(`Exporting frame ${i} from FrameEditor (active edit) as ${fileName}`);
                     }
                 }
@@ -68,10 +68,10 @@ export default function useFrameExporter(
                 if (!itemToAdd) {
                     if (frameSource && typeof frameSource === 'string') {
                         if (frameSource.startsWith('data:image/png;base64,')) {
-                            itemToAdd = { type: 'base64', data: frameSource, fileName };
+                            itemToAdd = { data: frameSource, file_name: fileName };
                             // console.log(`Exporting frame ${i} using existing Base64 as ${fileName}`);
                         } else if (originalFilePath) {
-                            itemToAdd = { type: 'filepath', path: originalFilePath, fileName };
+                            itemToAdd = { path: originalFilePath, file_name: fileName };
                             // console.log(`Exporting frame ${i} using original path ${originalFilePath} as ${fileName}`);
                         }
                     }
