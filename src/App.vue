@@ -7,6 +7,7 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import useProjectManagement from './composables/useProjectManagement';
 import useAnimatorSettings from './composables/useAnimatorSettings';
 import useFrameEditing from './composables/useFrameEditing';
+import useFrameExporter from './composables/useFrameExporter';
 
 // 导入子组件
 import FrameAnimator from './components/FrameAnimator.vue';
@@ -45,6 +46,22 @@ const {
   confirmFrameUpdate,
   cancelFrameEdit,
 } = useFrameEditing(extractedFrames, processingMessage);
+
+// Template ref for FrameEditor component
+const frameEditorRef = ref(null);
+
+// Initialize Frame Exporter Composable
+const {
+  isExporting,
+  exportError,
+  exportSuccessMessage,
+  handleExportSelectedFrames,
+} = useFrameExporter(
+  extractedFrames,          
+  originalFrameFilePaths,  
+  frameEditorRef,
+  frameBeingEdited
+);
 
 // Function to update App.vue's processingMessage ref
 const updateAppProcessingMessage = (newMessage) => {
@@ -200,6 +217,28 @@ async function handleSourceFilesUpdatedFromEditor() {
   }
 }
 
+// Handler for export request from FrameAnimator
+const onExportFramesRequested = async ({ startIndex, endIndex }) => {
+  if (!currentProjectName.value) {
+    exportError.value = "请先设置项目名称再导出。";
+    processingMessage.value = "请先设置项目名称再导出。";
+    return;
+  }
+  // Clear previous export messages
+  exportError.value = null;
+  exportSuccessMessage.value = null;
+  
+  const success = await handleExportSelectedFrames(startIndex, endIndex, currentProjectName.value);
+  
+  if (success) {
+    processingMessage.value = exportSuccessMessage.value;
+  } else if (exportError.value) {
+    processingMessage.value = exportError.value;
+  } else {
+    processingMessage.value = "导出操作已尝试，但未返回明确成功或失败消息。";
+  }
+};
+
 </script>
 
 <template>
@@ -229,6 +268,7 @@ async function handleSourceFilesUpdatedFromEditor() {
       :initial-end-index="initialEndIndexForAnimator"
       @playback-settings-changed="handleAnimatorPlaybackSettingsChanged" 
       @range-selected="handleAnimatorRangeSelected" 
+      @export-frames-requested="onExportFramesRequested"
       v-if="(extractedFrames.length > 0 || totalFrames > 0) && !frameBeingEdited"
     />
 
@@ -240,6 +280,7 @@ async function handleSourceFilesUpdatedFromEditor() {
     />
 
     <FrameEditor 
+      ref="frameEditorRef"
       :frame-to-edit="frameBeingEdited" 
       @update-frame="handleFrameUpdated"
       @cancel-edit="handleCancelEdit"
@@ -250,6 +291,17 @@ async function handleSourceFilesUpdatedFromEditor() {
       :update-app-processing-message="updateAppProcessingMessage"
       @frames-source-files-updated="handleSourceFilesUpdatedFromEditor"
     />
+
+    <!-- Display export status/messages -->
+    <div class="row export-status-display" v-if="isExporting">
+      <p>正在导出帧...</p>
+    </div>
+    <div class="row export-status-display success" v-if="!isExporting && exportSuccessMessage && !exportError">
+      <p>{{ exportSuccessMessage }}</p>
+    </div>
+    <div class="row export-status-display error" v-if="!isExporting && exportError">
+      <p>{{ exportError }}</p>
+    </div>
 
   </main>
 </template>
@@ -273,6 +325,38 @@ async function handleSourceFilesUpdatedFromEditor() {
 @media (prefers-color-scheme: dark) {
   .processing-status-display {
     color: #f0f0f0; 
+  }
+}
+
+.export-status-display { /* Styles for export status messages */
+  margin-top: 10px;
+  margin-bottom: 10px;
+  padding: 8px;
+  text-align: center;
+  font-size: 0.9em;
+  border-radius: 4px;
+}
+.export-status-display.success {
+  color: #155724;
+  background-color: #d4edda;
+  border: 1px solid #c3e6cb;
+}
+.export-status-display.error {
+  color: #721c24;
+  background-color: #f8d7da;
+  border: 1px solid #f5c6cb;
+}
+
+@media (prefers-color-scheme: dark) {
+  .export-status-display.success {
+    color: #d4edda;
+    background-color: #155724;
+    border-color: #28a745;
+  }
+  .export-status-display.error {
+    color: #f8d7da;
+    background-color: #721c24;
+    border-color: #dc3545;
   }
 }
 </style>

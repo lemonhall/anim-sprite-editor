@@ -2,8 +2,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use tauri::Manager; // 需要 app_handle 来解析路径
-use image::{DynamicImage, GenericImageView, ImageFormat, imageops}; // <-- 添加 image 和 imageops
+use image::{GenericImageView, imageops}; // <-- 添加 image 和 imageops
 use serde::Deserialize; // <-- 添加 Deserialize
+use std::io::Write; // Required for write_all for saving Base64 decoded files
+// Import the Engine trait and a standard engine for base64 decoding
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD_ENGINE};
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -313,6 +316,106 @@ async fn apply_crop_to_files(original_paths: Vec<String>, crop_params: CropRectP
     }
 }
 
+// Define the structures for deserializing export items from the frontend
+#[derive(Deserialize, Debug)]
+#[serde(untagged)] // Allows Serde to try to deserialize into one of the variants
+enum ExportPayload {
+    Base64 { data: String, file_name: String },
+    FilePath { path: String, file_name: String },
+}
+
+#[derive(Deserialize, Debug)]
+struct ExportItem {
+    #[serde(flatten)]
+    payload: ExportPayload,
+}
+
+#[tauri::command]
+async fn handle_export_frames_to_project(project_name: String, export_items: Vec<ExportItem>) -> Result<String, String> {
+    if project_name.trim().is_empty() {
+        return Err("项目名称不能为空。".to_string());
+    }
+    if export_items.is_empty() {
+        return Err("没有要导出的项目。".to_string());
+    }
+
+    // Use the existing helper to determine base directory for projects
+    let base_dir = determine_base_dir(); 
+    let project_dir = base_dir.join("projects").join(&project_name);
+    let output_dir = project_dir.join("outputs");
+
+    if !output_dir.exists() {
+        fs::create_dir_all(&output_dir)
+            .map_err(|e| format!("创建输出目录失败 '{}': {}", output_dir.display(), e))?;
+    }
+
+    let mut successful_exports = 0;
+    let mut errors = Vec::new();
+
+    for (index, item) in export_items.iter().enumerate() {
+        let result = match &item.payload {
+            ExportPayload::Base64 { data, file_name } => {
+                let target_file_path = output_dir.join(file_name);
+                let b64_data = data.split(',').nth(1).unwrap_or(data);
+                // Use the new Engine API for base64 decoding
+                match BASE64_STANDARD_ENGINE.decode(b64_data) { 
+                    Ok(bytes) => {
+                        match fs::File::create(&target_file_path) {
+                            Ok(mut file) => match file.write_all(&bytes) {
+                                Ok(_) => {
+                                    successful_exports += 1;
+                                    Ok(())
+                                }
+                                Err(e) => Err(format!("无法写入文件 '{}': {}", target_file_path.display(), e)),
+                            },
+                            Err(e) => Err(format!("无法创建文件 '{}': {}", target_file_path.display(), e)),
+                        }
+                    }
+                    Err(e) => Err(format!("Base64 解码失败 (文件名: {}): {}", file_name, e)),
+                }
+            }
+            ExportPayload::FilePath { path, file_name } => {
+                if path.starts_with("asset:") || path.starts_with("http:") || path.starts_with("https:"){
+                    return Err(format!("路径 '{}'似乎是URL，无法直接复制. 请提供本地文件路径.", path));
+                }
+                
+                let path_to_copy_str = if path.starts_with("file:///") {
+                    path[8..].to_string()
+                } else if path.starts_with("file://") {
+                    path[7..].to_string()
+                } else {
+                    path.to_string()
+                };
+                // Initialize effective_source_path directly with the processed string
+                let effective_source_path = PathBuf::from(path_to_copy_str);
+
+                if !effective_source_path.exists() {
+                    Err(format!("源文件未找到 '{}' (处理后路径: '{}')", path, effective_source_path.display()))
+                } else {
+                    let target_file_path = output_dir.join(file_name);
+                    match fs::copy(&effective_source_path, &target_file_path) {
+                        Ok(_) => {
+                            successful_exports +=1;
+                            Ok(())
+                        }
+                        Err(e) => Err(format!("无法复制文件从 '{}' 到 '{}': {}", effective_source_path.display(), target_file_path.display(), e)),
+                    }
+                }
+            }
+        };
+        if let Err(e) = result {
+            errors.push(format!("帧 {}: {}", index, e));
+        }
+    }
+
+    if !errors.is_empty() {
+        let error_message = format!("导出过程中发生错误:\n{}", errors.join("\n"));
+         Err(format!("成功导出 {} 帧，但有 {} 个错误。\n{}", successful_exports, errors.len(), error_message))
+    } else {
+         Ok(format!("成功导出 {} 帧到项目 '{}' 的 outputs 文件夹。", successful_exports, project_name))
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -323,7 +426,8 @@ pub fn run() {
             greet, 
             process_video,
             get_src_tauri_projects_path,
-            apply_crop_to_files // <-- 添加新的命令
+            apply_crop_to_files,
+            handle_export_frames_to_project // <-- 添加新的命令
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
