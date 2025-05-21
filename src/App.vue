@@ -62,12 +62,17 @@ async function handleVideoImportReady(importData) {
 
   const processingResult = await importAndProcessVideo(importData);
 
-  if (processingResult.success) {
-    initializeAnimatorOnNewVideo(processingResult.frameCount, currentExtractionFps.value);
+  if (processingResult && Array.isArray(processingResult) && processingResult.length > 0) {
+    initializeAnimatorOnNewVideo(processingResult.length, currentExtractionFps.value);
   } else {
-    extractedFrames.value = [];
-    originalFrameFilePaths.value = [];
     initializeAnimatorOnNewVideo(0, currentExtractionFps.value);
+    if (!processingResult || (Array.isArray(processingResult) && processingResult.length === 0)){
+        extractedFrames.value = [];
+        originalFrameFilePaths.value = [];
+        if (!processingMessage.value || processingMessage.value.startsWith("正在")) {
+            processingMessage.value = "视频处理失败或未生成任何帧。";
+        }
+    }
   }
 }
 
