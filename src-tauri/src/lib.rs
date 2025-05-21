@@ -1,11 +1,28 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use tauri::Manager; // 需要 app_handle 来解析路径
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You\'ve been greeted from Rust!", name)
+}
+
+#[tauri::command]
+async fn get_src_tauri_projects_path(app: tauri::AppHandle) -> Result<String, String> {
+    match app.path().resource_dir() { // resource_dir() 返回 Result<PathBuf, Error>
+        Ok(resource_dir) => { // 匹配 Ok(...)
+            // $APP (resource_dir) 在开发时通常是 src-tauri/target/debug/
+            // 我们要向上两级 (到 src-tauri/) 然后再进入 projects/
+            let projects_path = resource_dir.join("../../projects/");
+            match dunce::canonicalize(&projects_path) {
+                Ok(canonical_path) => canonical_path.to_str().map(|s| s.to_string()).ok_or_else(|| "Path is not valid UTF-8".to_string()),
+                Err(e) => Err(format!("Failed to canonicalize src-tauri projects path ({}): {}", projects_path.display(), e.to_string()))
+            }
+        }
+        Err(e_resolve) => Err(format!("Could not determine resource directory: {}", e_resolve.to_string())), // 匹配 Err(...)
+    }
 }
 
 // 修改: 处理视频路径和项目名称的命令
@@ -187,7 +204,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![greet, process_video])
+        .plugin(tauri_plugin_fs::init())
+        .invoke_handler(tauri::generate_handler![
+            greet, 
+            process_video,
+            get_src_tauri_projects_path // 添加新命令
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

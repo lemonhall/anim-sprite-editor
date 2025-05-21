@@ -7,34 +7,79 @@ const props = defineProps({
     required: true,
     default: () => []
   },
-  fps: {
+  extractionFps: { // Renamed from fps to be clear this is from video processing
     type: Number,
     required: true,
     default: 10
+  },
+  // New props for initial settings from loaded project metadata
+  initialPlaybackFps: { 
+    type: Number,
+    default: null // Will use extractionFps if null
+  },
+  initialStartIndex: { 
+    type: Number, 
+    default: 0 
+  },
+  initialEndIndex: { 
+    type: Number, 
+    default: null // null means to the end
   }
 });
 
-const emit = defineEmits(['range-selected']);
+const emit = defineEmits(['range-selected', 'playback-settings-changed']); // Added playback-settings-changed
 
 const isPlaying = ref(false);
 const animationTimerId = ref(null);
 const currentFrameSrc = ref('');
-const currentFrameDisplayIndex = ref(0);
+const currentFrameDisplayIndex = ref(0); 
 
+// Input state
 const inputStartIndex = ref(0);
 const inputEndIndex = ref(null);
+const playbackFpsInput = ref(10); // For the new playback FPS input field
 
-// Internal state for the actual playback range
+// Internal state for the actual playback range & FPS
 const actualPlaybackStartIndex = ref(0);
 const actualPlaybackEndIndex = ref(0);
+// actualPlaybackFps is not needed as a separate ref, playbackFpsInput will be the source of truth for UI and logic
 
-// Computed property for the length of the current animation sequence
 const currentSequenceLength = computed(() => {
   if (!props.frames || props.frames.length === 0 || actualPlaybackEndIndex.value < actualPlaybackStartIndex.value) {
     return 0;
   }
   return actualPlaybackEndIndex.value - actualPlaybackStartIndex.value + 1;
 });
+
+function updateInternalStateFromInitialProps() {
+  playbackFpsInput.value = props.initialPlaybackFps !== null ? props.initialPlaybackFps : props.extractionFps;
+  inputStartIndex.value = props.initialStartIndex;
+  inputEndIndex.value = props.initialEndIndex;
+  
+  // Also directly set the actual playback parameters from these initial values
+  // This logic is similar to parts of handleSetRange, but for initialization
+  let newStart = Number(props.initialStartIndex) || 0;
+  let newEnd = props.initialEndIndex;
+
+  if (props.frames.length === 0) {
+    actualPlaybackStartIndex.value = 0;
+    actualPlaybackEndIndex.value = 0;
+  } else {
+    const maxFrameIdx = props.frames.length - 1;
+    newStart = Math.max(0, Math.min(newStart, maxFrameIdx));
+
+    if (newEnd === null || typeof newEnd !== 'number') {
+      newEnd = maxFrameIdx;
+    } else {
+      newEnd = Number(newEnd);
+    }
+    newEnd = Math.min(Math.max(newStart, newEnd), maxFrameIdx);
+    
+    actualPlaybackStartIndex.value = newStart;
+    actualPlaybackEndIndex.value = newEnd;
+  }
+  resetAnimationToCurrentRangeStart();
+}
 
 function resetAnimationToCurrentRangeStart() {
   stopAnimation();
@@ -44,32 +89,28 @@ function resetAnimationToCurrentRangeStart() {
       actualPlaybackStartIndex.value <= actualPlaybackEndIndex.value) {
     currentFrameDisplayIndex.value = actualPlaybackStartIndex.value;
     currentFrameSrc.value = props.frames[currentFrameDisplayIndex.value];
-  } else if (props.frames.length > 0) { // Fallback to first frame if range is weird but frames exist
+  } else if (props.frames.length > 0) { 
     currentFrameDisplayIndex.value = 0;
     currentFrameSrc.value = props.frames[0];
   } else {
-    currentFrameSrc.value = ''; // No frames, clear image
+    currentFrameSrc.value = ''; 
     currentFrameDisplayIndex.value = 0;
   }
 }
 
 function playAnimation() {
-  if (currentSequenceLength.value <= 0 || props.fps <= 0) {
-    stopAnimation(); // Ensure it's stopped if conditions aren't met
+  if (currentSequenceLength.value <= 0 || playbackFpsInput.value <= 0) {
+    stopAnimation(); 
     return;
   }
   
   isPlaying.value = true;
-  if (animationTimerId.value) {
-    clearInterval(animationTimerId.value);
-  }
+  if (animationTimerId.value) clearInterval(animationTimerId.value);
 
-  // Ensure currentFrameDisplayIndex is within the current playback range before starting
   if (currentFrameDisplayIndex.value < actualPlaybackStartIndex.value || 
       currentFrameDisplayIndex.value > actualPlaybackEndIndex.value) {
     currentFrameDisplayIndex.value = actualPlaybackStartIndex.value;
   }
-  // Update src just in case it wasn't set by the above, or if it's the first play
   if (currentFrameDisplayIndex.value >=0 && currentFrameDisplayIndex.value < props.frames.length) {
       currentFrameSrc.value = props.frames[currentFrameDisplayIndex.value];
   }
@@ -79,7 +120,7 @@ function playAnimation() {
     positionInSequence = (positionInSequence + 1) % currentSequenceLength.value;
     currentFrameDisplayIndex.value = actualPlaybackStartIndex.value + positionInSequence;
     currentFrameSrc.value = props.frames[currentFrameDisplayIndex.value];
-  }, 1000 / props.fps);
+  }, 1000 / playbackFpsInput.value);
 }
 
 function stopAnimation() {
@@ -91,12 +132,20 @@ function stopAnimation() {
 }
 
 function togglePlayAnimation() {
-  if (currentSequenceLength.value === 0) return; // Can't play if no valid sequence
+  if (currentSequenceLength.value === 0 && props.frames.length > 0) {
+      // If sequence is 0 but frames exist, it might be due to invalid start/end after load.
+      // Try to re-evaluate from inputs.
+      console.warn("Toggle play: sequence length 0, attempting to set range first.");
+      handleSetRange(); // This will update actuals and reset display if needed
+      // If still 0 after setRange (e.g. no frames), then return
+      if(currentSequenceLength.value === 0) return;
+  } else if (currentSequenceLength.value === 0 && props.frames.length === 0) {
+    return; // No frames at all, cannot play
+  }
 
   if (isPlaying.value) {
     stopAnimation();
   } else {
-    // If current display is outside new range, or no src, reset to start of current range
     if (currentFrameDisplayIndex.value < actualPlaybackStartIndex.value || 
         currentFrameDisplayIndex.value > actualPlaybackEndIndex.value || 
         !currentFrameSrc.value) {
@@ -104,7 +153,7 @@ function togglePlayAnimation() {
         currentFrameDisplayIndex.value = actualPlaybackStartIndex.value; 
         currentFrameSrc.value = props.frames[currentFrameDisplayIndex.value];
       } else {
-        return; // Cannot start if actualPlaybackStartIndex is invalid
+        return; 
       }
     }
     playAnimation();
@@ -112,91 +161,116 @@ function togglePlayAnimation() {
 }
 
 function handleSetRange() {
-  const newStartInput = Number(inputStartIndex.value) || 0;
-  const newEndInput = inputEndIndex.value; // Can be null, empty, or number
+  const newStartInputVal = Number(inputStartIndex.value) || 0;
+  const newEndInputVal = inputEndIndex.value;
 
-  let finalStart = Math.max(0, newStartInput);
+  let finalStart = Math.max(0, newStartInputVal);
   let finalEnd;
 
   if (props.frames.length === 0) {
     actualPlaybackStartIndex.value = 0;
     actualPlaybackEndIndex.value = 0;
-    resetAnimationToCurrentRangeStart(); 
-    emit('range-selected', { start: 0, end: 0 });
-    return;
-  }
-
-  const maxFrameIdx = props.frames.length - 1;
-  finalStart = Math.min(finalStart, maxFrameIdx); // Cannot be more than max index
-
-  if (newEndInput === null || newEndInput === '' || typeof newEndInput !== 'number') {
-    finalEnd = maxFrameIdx; // Default to last frame
   } else {
-    finalEnd = Number(newEndInput);
+    const maxFrameIdx = props.frames.length - 1;
+    finalStart = Math.min(finalStart, maxFrameIdx);
+    if (newEndInputVal === null || newEndInputVal === '' || typeof newEndInputVal !== 'number') {
+      finalEnd = maxFrameIdx;
+    } else {
+      finalEnd = Number(newEndInputVal);
+    }
+    finalEnd = Math.min(Math.max(finalStart, finalEnd), maxFrameIdx);
+    
+    actualPlaybackStartIndex.value = finalStart;
+    actualPlaybackEndIndex.value = finalEnd;
   }
-
-  // Ensure end is not less than start, and not more than max frame index
-  finalEnd = Math.min(Math.max(finalStart, finalEnd), maxFrameIdx);
   
-  actualPlaybackStartIndex.value = finalStart;
-  actualPlaybackEndIndex.value = finalEnd;
-
   resetAnimationToCurrentRangeStart(); 
+  // Emit both events, range-selected for grid, playback-settings-changed for App.vue to save
   emit('range-selected', { start: actualPlaybackStartIndex.value, end: actualPlaybackEndIndex.value });
-  console.log(`FrameAnimator emitted range-selected & set playback range: Start: ${actualPlaybackStartIndex.value}, End: ${actualPlaybackEndIndex.value}`);
+  emitPlaybackSettingsChanged();
+  console.log(`SetRange: Playback range: ${actualPlaybackStartIndex.value}-${actualPlaybackEndIndex.value}`);
 }
 
+function handlePlaybackFpsChange() {
+    if (playbackFpsInput.value < 1) playbackFpsInput.value = 1;
+    if (playbackFpsInput.value > 120) playbackFpsInput.value = 120;
+    if (isPlaying.value) {
+        stopAnimation();
+        playAnimation();
+    }
+    emitPlaybackSettingsChanged();
+}
 
+function emitPlaybackSettingsChanged(){
+    emit('playback-settings-changed', {
+        playbackFps: Number(playbackFpsInput.value),
+        startIndex: actualPlaybackStartIndex.value, // Use the actual applied start index
+        endIndex: actualPlaybackEndIndex.value     // Use the actual applied end index
+    });
+    console.log("Emitted playback-settings-changed");
+}
+
+// Watch for new frames (e.g. new video processed)
 watch(() => props.frames, (newFrames) => {
   stopAnimation();
-  inputStartIndex.value = 0;
-  inputEndIndex.value = null;
-
+  // When frames change, re-initialize everything based on new frame data and initial props
   if (newFrames && newFrames.length > 0) {
-    actualPlaybackStartIndex.value = 0;
-    actualPlaybackEndIndex.value = newFrames.length - 1;
-    currentFrameDisplayIndex.value = 0; 
-    currentFrameSrc.value = newFrames[0]; 
+    updateInternalStateFromInitialProps(); // This will set inputs and actuals
   } else {
+    // No frames, reset all relevant state
+    inputStartIndex.value = 0;
+    inputEndIndex.value = null;
+    playbackFpsInput.value = props.extractionFps; // Default to extraction FPS
     actualPlaybackStartIndex.value = 0;
     actualPlaybackEndIndex.value = 0; 
     currentFrameDisplayIndex.value = 0;
     currentFrameSrc.value = ''; 
   }
-}, { immediate: true }); 
+}, { immediate: true, deep: true }); 
 
-watch(() => props.fps, (newFps) => {
-  if (isPlaying.value && newFps > 0 && currentSequenceLength.value > 0) {
-    // No need to reset currentFrameDisplayIndex here, just restart with new speed
-    stopAnimation(); 
-    playAnimation(); 
-  }
-});
+// Watch for changes in initial props if they are updated reactively from App.vue after first load
+watch([() => props.initialPlaybackFps, () => props.initialStartIndex, () => props.initialEndIndex, () => props.extractionFps],
+  () => {
+    console.log("[FrameAnimator] Initial props changed, re-initializing state.");
+    updateInternalStateFromInitialProps();
+  }, 
+  { deep: true } // deep might be overkill if these are just numbers/null
+);
+
 
 onBeforeUnmount(() => {
   stopAnimation();
 });
 
-// onMounted is effectively handled by immediate watch on props.frames
-
 </script>
 
 <template>
   <div class="animation-section-component">
-    <div class="animation-controls">
+    <div class="animation-controls top-controls">
       <button @click="togglePlayAnimation" :disabled="currentSequenceLength === 0">
         {{ isPlaying ? '暂停动画' : '播放动画' }}
       </button>
-      <span class="fps-display">动画FPS: {{ fps }}</span>
+      <div class="input-group-control fps-control">
+        <label for="playback-fps-input">播放FPS:</label>
+        <input 
+          type="number" 
+          id="playback-fps-input" 
+          v-model.number="playbackFpsInput" 
+          min="1" 
+          max="120"
+          @change="handlePlaybackFpsChange" 
+          :disabled="frames.length === 0"
+        />
+      </div>
     </div>
     
     <div class="range-settings-controls">
       <div class="input-group-control">
-        <label for="anim-start-index">开始帧 (0-indexed):</label>
+        <label for="anim-start-index">开始帧:</label>
         <input type="number" id="anim-start-index" v-model.number="inputStartIndex" min="0" :max="frames.length > 0 ? frames.length - 1 : 0" :disabled="frames.length === 0">
       </div>
       <div class="input-group-control">
-        <label for="anim-end-index">结束帧 (0-indexed, 留空则至末尾):</label>
+        <label for="anim-end-index">结束帧:</label>
         <input type="number" id="anim-end-index" v-model.number="inputEndIndex" min="0" :max="frames.length > 0 ? frames.length - 1 : 0" placeholder="末尾" :disabled="frames.length === 0">
       </div>
       <button @click="handleSetRange" class="set-range-button" :disabled="frames.length === 0">设置范围</button>
@@ -227,20 +301,26 @@ onBeforeUnmount(() => {
   align-items: center;
 }
 
-.animation-controls {
-  margin-bottom: 15px;
+.top-controls {
   display: flex;
   align-items: center;
   gap: 15px;
+  margin-bottom: 10px; /* Reduced margin slightly */
 }
 
-.animation-controls button {
+.top-controls button {
   padding: 0.5em 1em;
 }
 
-.fps-display {
-  font-size: 0.9em;
-  color: #555;
+.fps-control label {
+  font-size: 0.85em;
+}
+.fps-control input {
+  width: 60px; /* Slightly smaller for FPS */
+  padding: 0.3em 0.5em;
+  font-size: 0.85em;
+  border: 1px solid #ccc;
+  border-radius: 4px;
 }
 
 .range-settings-controls {
@@ -252,6 +332,7 @@ onBeforeUnmount(() => {
   margin-bottom: 15px;
   border-radius: 6px;
   flex-wrap: wrap; 
+  width: 100%; /* Ensure it takes full width for centering */
 }
 
 .input-group-control {
@@ -293,6 +374,7 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
+
 .animation-player {
   width: 100%;
   max-width: 300px; 
@@ -321,18 +403,18 @@ onBeforeUnmount(() => {
     background-color: #3a3a3a;
     border-color: #555;
   }
-  .fps-display {
-    color: #bbb;
-  }
+  .fps-control label, /* Combined with other labels for dark mode */
   .input-group-control label {
     color: #f0f0f0; 
   }
+  .fps-control input, /* Combined with other inputs for dark mode */
   .input-group-control input[type="number"] {
     background-color: #2f2f2f;
     color: #f0f0f0;
     border-color: #555;
   }
-   .input-group-control input[type="number"]:disabled {
+  .fps-control input:disabled,
+  .input-group-control input[type="number"]:disabled {
     background-color: #444;
     color: #888;
   }

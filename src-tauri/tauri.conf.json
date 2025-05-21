@@ -31,6 +31,25 @@
           "permissions": [
             "dialog:default"
           ]
+        },
+        {
+          "identifier": "fs:project-access-src-tauri-dev",
+          "description": "Allows RWM access to project files in E:/development/anim-sprite-editor/src-tauri/projects/ for dev.",
+          "windows": ["main"],
+          "permissions": [
+            {
+              "identifier": "fs:read-all",
+              "allow": ["E:/development/anim-sprite-editor/src-tauri/projects/**"]
+            },
+            {
+              "identifier": "fs:write-all",
+              "allow": ["E:/development/anim-sprite-editor/src-tauri/projects/**"]
+            },
+            {
+              "identifier": "fs:allow-mkdir",
+              "allow": ["E:/development/anim-sprite-editor/src-tauri/projects/**"]
+            }
+          ]
         }
       ]
     }
@@ -47,6 +66,7 @@
     ]
   },
   "plugins": {
-    "dialog": null
+    "dialog": null,
+    "fs": null
   }
 }
