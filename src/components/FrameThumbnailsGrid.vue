@@ -14,11 +14,18 @@ const props = defineProps({
   }
 });
 
+const emit = defineEmits(['edit-frame-requested']);
+
 const isFrameSelected = (index) => {
   if (props.selectedRange && typeof props.selectedRange.start === 'number' && typeof props.selectedRange.end === 'number') {
     return index >= props.selectedRange.start && index <= props.selectedRange.end;
   }
   return false;
+};
+
+const handleDoubleClick = (index) => {
+  console.log(`[FrameGrid] Double-clicked on frame index: ${index}`);
+  emit('edit-frame-requested', index);
 };
 </script>
 
@@ -30,7 +37,10 @@ const isFrameSelected = (index) => {
       class="frame-item" 
       :class="{ 'is-selected': isFrameSelected(index) }"
     >
-      <img :src="frameSrc" :alt="`Frame ${index}`" />
+      <img 
+        :src="frameSrc" 
+        :alt="`Frame ${index}`" 
+        @dblclick="handleDoubleClick(index)" />
       <span class="frame-sequence-number">{{ index }}</span>
     </div>
   </div>

@@ -6,9 +6,11 @@ import { invoke, convertFileSrc } from "@tauri-apps/api/core"; // 静态导入 c
 import FrameAnimator from './components/FrameAnimator.vue';
 import FrameThumbnailsGrid from './components/FrameThumbnailsGrid.vue';
 import ProjectSetupAndImport from './components/ProjectSetupAndImport.vue';
+import FrameEditor from './components/FrameEditor.vue'; // Import FrameEditor
 
 // App.vue 现在主要管理处理后的结果和整体状态
 const extractedFrames = ref([]);
+const originalFrameFilePaths = ref([]); // To store original file paths from backend if needed for overwriting
 const processingMessage = ref("");
 
 // State to hold current project context and settings for children components
@@ -25,6 +27,9 @@ const animatorSettings = ref({
 
 // This is passed to FrameThumbnailsGrid to highlight the selection
 const currentSelectedRangeForGrid = ref({ start: 0, end: -1 });
+
+// --- Frame Editor State ---
+const frameBeingEdited = ref(null); // { index: number, src: string (asset URL or dataURL) }
 
 // Computed properties to pass as :initial-xxx to FrameAnimator
 const initialPlaybackFpsForAnimator = computed(() => animatorSettings.value.playbackFps);
@@ -49,7 +54,9 @@ const totalFramesForSave = computed(() => animatorSettings.value.totalFrames);
 async function handleVideoImportReady(importData) {
   console.log("[App.vue] Import Ready. Data:", importData);
   processingMessage.value = "正在准备处理视频...";
-  extractedFrames.value = []; // Clear previous frames
+  extractedFrames.value = [];
+  originalFrameFilePaths.value = []; // Clear original paths
+  frameBeingEdited.value = null; // Close editor if open
   
   currentProjectName.value = importData.projectName;
   currentExtractionFps.value = importData.fps;
@@ -71,31 +78,32 @@ async function processVideoWithBackend(videoPath, projectName, fpsValue) {
   processingMessage.value = "正在处理视频，请稍候...";
   try {
     console.log(`Sending to backend - Path: ${videoPath}, Project: ${projectName}, FPS: ${fpsValue}`);
-    const framePaths = await invoke("process_video", { 
+    const frameFilePathsFromBackend = await invoke("process_video", { 
       path: videoPath, 
       projectName: projectName,
       fps: Number(fpsValue)
     });
-    console.log("Backend processing result (frame paths):", framePaths);
+    console.log("Backend processing result (raw file paths):", frameFilePathsFromBackend);
     
-    if (Array.isArray(framePaths) && framePaths.length > 0) {
-      // convertFileSrc 现在是从顶部导入的
-      extractedFrames.value = framePaths.map(p => convertFileSrc(p)); 
-      processingMessage.value = `成功提取 ${framePaths.length} 帧！`;
+    if (Array.isArray(frameFilePathsFromBackend) && frameFilePathsFromBackend.length > 0) {
+      originalFrameFilePaths.value = [...frameFilePathsFromBackend]; // Store original paths
+      extractedFrames.value = frameFilePathsFromBackend.map(p => convertFileSrc(p)); 
+      processingMessage.value = `成功提取 ${frameFilePathsFromBackend.length} 帧！`;
       
       // Update totalFrames and potentially endIndex if it was null
-      animatorSettings.value.totalFrames = framePaths.length;
-      if (animatorSettings.value.endIndex === null || animatorSettings.value.endIndex >= framePaths.length) {
-        animatorSettings.value.endIndex = framePaths.length - 1;
+      animatorSettings.value.totalFrames = frameFilePathsFromBackend.length;
+      if (animatorSettings.value.endIndex === null || animatorSettings.value.endIndex >= frameFilePathsFromBackend.length) {
+        animatorSettings.value.endIndex = frameFilePathsFromBackend.length - 1;
       }
       // Ensure startIndex is also valid
-      if (animatorSettings.value.startIndex >= framePaths.length) {
+      if (animatorSettings.value.startIndex >= frameFilePathsFromBackend.length) {
           animatorSettings.value.startIndex = 0;
       }
       currentSelectedRangeForGrid.value = { start: animatorSettings.value.startIndex, end: animatorSettings.value.endIndex };
 
-    } else if (Array.isArray(framePaths) && framePaths.length === 0) {
+    } else if (Array.isArray(frameFilePathsFromBackend) && frameFilePathsFromBackend.length === 0) {
       extractedFrames.value = [];
+      originalFrameFilePaths.value = [];
       processingMessage.value = "处理成功，但未提取到任何帧。请检查视频内容和FPS设置。";
       animatorSettings.value.totalFrames = 0;
       animatorSettings.value.startIndex = 0;
@@ -103,23 +111,27 @@ async function processVideoWithBackend(videoPath, projectName, fpsValue) {
       currentSelectedRangeForGrid.value = { start: 0, end: -1 };
     } else {
       extractedFrames.value = [];
+      originalFrameFilePaths.value = [];
       processingMessage.value = "后端返回了意外的数据格式。";
       animatorSettings.value = { playbackFps: currentExtractionFps.value, startIndex: 0, endIndex: null, totalFrames: 0 };
       currentSelectedRangeForGrid.value = { start: 0, end: -1 };
-      console.warn("Unexpected backend response:", framePaths);
+      console.warn("Unexpected backend response:", frameFilePathsFromBackend);
     }
 
   } catch (error) {
     console.error("Error calling process_video command:", error);
     extractedFrames.value = []; 
+    originalFrameFilePaths.value = [];
     processingMessage.value = `处理视频失败: ${error}`;
     animatorSettings.value = { playbackFps: currentExtractionFps.value, startIndex: 0, endIndex: null, totalFrames: 0 };
     currentSelectedRangeForGrid.value = { start: 0, end: -1 };
+    frameBeingEdited.value = null;
   }
 }
 
 function handleProjectMetadataLoaded(loadedData) {
   console.log("[App.vue] Project Metadata Loaded. Data:", loadedData);
+  frameBeingEdited.value = null; // Close editor if open
   if (loadedData && typeof loadedData.projectName === 'string') {
     currentProjectName.value = loadedData.projectName;
     currentExtractionFps.value = typeof loadedData.extractionFps === 'number' ? loadedData.extractionFps : 10;
@@ -195,9 +207,44 @@ function updateProcessingMessage(message) {
 
 function handleImportError(errorMessage) {
   processingMessage.value = errorMessage;
-  extractedFrames.value = []; // Clear frames on import error
+  extractedFrames.value = [];
+  originalFrameFilePaths.value = [];
   animatorSettings.value = { playbackFps: 10, startIndex: 0, endIndex: null, totalFrames: 0 };
   currentSelectedRangeForGrid.value = { start: 0, end: -1 };
+  frameBeingEdited.value = null;
+}
+
+// --- Frame Editor Event Handlers ---
+function handleEditFrameRequest(frameIndex) {
+  if (frameIndex >= 0 && frameIndex < extractedFrames.value.length) {
+    const frameSrc = extractedFrames.value[frameIndex];
+    // const originalFile = originalFrameFilePaths.value[frameIndex]; // If needed later for overwriting original file
+    frameBeingEdited.value = {
+      index: frameIndex,
+      src: frameSrc,
+      // originalSrc: originalFile // For future use if overwriting files
+    };
+    console.log("[App.vue] Editing frame:", frameBeingEdited.value);
+  } else {
+    console.warn("[App.vue] Invalid frame index for editing:", frameIndex);
+  }
+}
+
+function handleFrameUpdated(payload) { // { index, newSrcDataUrl }
+  console.log("[App.vue] Frame updated from editor:", payload);
+  if (payload.index >= 0 && payload.index < extractedFrames.value.length) {
+    extractedFrames.value[payload.index] = payload.newSrcDataUrl;
+    // Here, we could also invoke a Rust command to overwrite the original PNG file
+    // with the new base64 data if that's desired.
+    // For now, we just update the in-memory representation for preview and animation.
+    processingMessage.value = `帧 #${payload.index} 已更新。`;
+  }
+  frameBeingEdited.value = null; // Close editor
+}
+
+function handleCancelEdit() {
+  console.log("[App.vue] Frame editing cancelled.");
+  frameBeingEdited.value = null; // Close editor
 }
 
 </script>
@@ -227,13 +274,21 @@ function handleImportError(errorMessage) {
       :initial-end-index="initialEndIndexForAnimator"
       @playback-settings-changed="handleAnimatorPlaybackSettingsChanged" 
       @range-selected="handleAnimatorRangeSelected" 
-      v-if="extractedFrames.length > 0 || animatorSettings.totalFrames > 0"
+      v-if="(extractedFrames.length > 0 || animatorSettings.totalFrames > 0) && !frameBeingEdited"
     />
 
     <FrameThumbnailsGrid 
       :frames="extractedFrames" 
       :selected-range="currentSelectedRangeForGrid" 
-      v-if="extractedFrames.length > 0 || animatorSettings.totalFrames > 0"
+      @edit-frame-requested="handleEditFrameRequest" 
+      v-if="(extractedFrames.length > 0 || animatorSettings.totalFrames > 0) && !frameBeingEdited"
+    />
+
+    <FrameEditor 
+      :frame-to-edit="frameBeingEdited" 
+      @update-frame="handleFrameUpdated"
+      @cancel-edit="handleCancelEdit"
+      v-if="frameBeingEdited" 
     />
 
   </main>
