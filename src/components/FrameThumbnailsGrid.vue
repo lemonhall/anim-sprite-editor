@@ -11,7 +11,8 @@ const props = defineProps({
 <template>
   <div class="frames-grid-container-component" v-if="frames.length > 0">
     <div v-for="(frameSrc, index) in frames" :key="index" class="frame-item">
-      <img :src="frameSrc" :alt="`Frame ${index + 1}`" />
+      <img :src="frameSrc" :alt="`Frame ${index}`" />
+      <span class="frame-sequence-number">{{ index }}</span>
     </div>
   </div>
   <div v-else class="no-frames-placeholder">
@@ -30,12 +31,24 @@ const props = defineProps({
   border-top: 1px solid #eee; 
 }
 
+.frame-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
 .frame-item img {
   width: 100%;
   height: auto;
   object-fit: contain; 
   border: 1px solid #ddd;
   border-radius: 4px;
+}
+
+.frame-sequence-number {
+  margin-top: 4px;
+  font-size: 0.8em;
+  color: #555;
 }
 
 .no-frames-placeholder {
