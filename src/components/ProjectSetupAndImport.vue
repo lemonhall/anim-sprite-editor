@@ -6,13 +6,22 @@ import { readTextFile, mkdir, writeTextFile } from '@tauri-apps/plugin-fs';
 // import { resolve, appConfigDir } from '@tauri-apps/api/path'; // Path API if needed for complex resolution
 
 const props = defineProps({
-  latestPlaybackSettings: { // Received from App.vue
+  latestAnimatorSettings: { // ADDED - Replaces the two props above
     type: Object,
-    default: () => ({ playbackFps: 10, startIndex: 0, endIndex: null })
+    default: () => ({
+      playbackFps: 10,
+      animationStartIndex: 0,
+      animationEndIndex: null,
+      totalFrames: 0
+    })
   },
-  latestTotalFrames: {    // Received from App.vue
+  initialProjectName: {
+    type: String,
+    default: ''
+  },
+  initialExtractionFps: {
     type: Number,
-    default: 0
+    default: 10
   }
 });
 
@@ -21,22 +30,15 @@ const emit = defineEmits([
   'import-cancelled',
   'import-error',
   'processing-status',
-  'project-metadata-loaded' // Emitted when project metadata is loaded from file
-  // No longer emits 'save-project-requested' or 'project-context-updated', handles save internally
+  'project-metadata-loaded'
 ]);
 
-const projectName = ref('');
-const extractionFpsInput = ref(10); // User input for extraction FPS
+const projectName = ref(props.initialProjectName); // Initialize with prop
+const extractionFpsInput = ref(props.initialExtractionFps); // Initialize with prop
 const videoPlayerSrc = ref('');
-const selectedOriginalVideoPath = ref(''); // Raw path of the selected video
+const selectedOriginalVideoPath = ref('');
 const isLoadingSettings = ref(false);
 const isSavingSettings = ref(false);
-
-// Internal state for values to be saved, updated by props or internal changes
-const playbackFpsToSave = ref(props.latestPlaybackSettings.playbackFps);
-const animationStartIndexToSave = ref(props.latestPlaybackSettings.startIndex);
-const animationEndIndexToSave = ref(props.latestPlaybackSettings.endIndex);
-const totalFramesToSave = ref(props.latestTotalFrames);
 
 // Helper function to get the absolute path for project files
 async function getAbsoluteProjectPath(projectNameVal, fileName = '') {
@@ -62,19 +64,20 @@ async function getAbsoluteProjectPath(projectNameVal, fileName = '') {
   }
 }
 
-// Watch for updates from App.vue (e.g., FrameAnimator changes playback settings)
-watch(() => props.latestPlaybackSettings, (newSettings) => {
-  playbackFpsToSave.value = newSettings.playbackFps;
-  animationStartIndexToSave.value = newSettings.startIndex;
-  animationEndIndexToSave.value = newSettings.endIndex;
-  console.log("[ProjectSetup] latestPlaybackSettings prop updated:", newSettings);
-}, { deep: true });
-
-watch(() => props.latestTotalFrames, (newTotal) => {
-  totalFramesToSave.value = newTotal;
-  console.log("[ProjectSetup] latestTotalFrames prop updated:", newTotal);
+// Watch for initial props to set local state if they arrive after component mount
+// or if they are dynamically changed by App.vue in a way not covered by typical v-model binding
+watch(() => props.initialProjectName, (newName) => {
+  if (newName !== projectName.value) {
+    projectName.value = newName;
+    if (isProjectNameValid(newName)) {
+      loadProjectMetadata(newName.trim());
+    }
+  }
 });
 
+watch(() => props.initialExtractionFps, (newFps) => {
+  extractionFpsInput.value = newFps;
+});
 
 async function triggerVideoSelect() {
   try {
@@ -131,13 +134,10 @@ async function loadProjectMetadata(name) {
       }
       extractionFpsInput.value = typeof loadedData.extractionFps === 'number' ? loadedData.extractionFps : 10;
       
-      // Update internal state for saving (these will also be reflected back to App.vue via emit)
-      playbackFpsToSave.value = typeof loadedData.playbackFps === 'number' ? loadedData.playbackFps : extractionFpsInput.value;
-      animationStartIndexToSave.value = typeof loadedData.animationStartIndex === 'number' ? loadedData.animationStartIndex : 0;
-      animationEndIndexToSave.value = typeof loadedData.animationEndIndex === 'number' ? loadedData.animationEndIndex : (loadedData.totalFrames ? loadedData.totalFrames -1 : null) ;
-      totalFramesToSave.value = typeof loadedData.totalFrames === 'number' ? loadedData.totalFrames : 0;
-
-      emit('project-metadata-loaded', { ...loadedData }); // Emit a copy
+      // App.vue will receive this and update useAnimatorSettings.
+      // ProjectSetupAndImport will then receive the updated latestAnimatorSettings prop.
+      // No need to update playbackFpsToSave etc. here directly from loadedData.
+      emit('project-metadata-loaded', { ...loadedData }); 
       emit('processing-status', `项目 ${trimmedName} 的元数据已加载。`);
     } else {
       emit('processing-status', `项目 ${trimmedName} 未找到元数据或元数据为空。`);
@@ -173,15 +173,20 @@ async function handleSaveProjectMetadata() {
       const absoluteProjectDir = await getAbsoluteProjectPath(trimmedName);
       const absoluteFilePath = await getAbsoluteProjectPath(trimmedName, 'project_meta.json');
 
+      // Use values directly from props.latestAnimatorSettings
       const metadataToSave = {
           projectName: trimmedName,
           originalVideoPath: selectedOriginalVideoPath.value,
           extractionFps: Number(extractionFpsInput.value),
-          playbackFps: Number(playbackFpsToSave.value),
-          totalFrames: Number(totalFramesToSave.value),
-          framePattern: "frame_%04d.png",
-          animationStartIndex: Number(animationStartIndexToSave.value),
-          animationEndIndex: Number(animationEndIndexToSave.value === null || animationEndIndexToSave.value === '' ? totalFramesToSave.value -1 : animationEndIndexToSave.value)
+          // Values from the latestAnimatorSettings prop
+          playbackFps: Number(props.latestAnimatorSettings.playbackFps),
+          totalFrames: Number(props.latestAnimatorSettings.totalFrames),
+          framePattern: "frame_%04d.png", // This can remain or be made configurable later
+          animationStartIndex: Number(props.latestAnimatorSettings.animationStartIndex),
+          // Ensure animationEndIndex is correctly handled if it's null (meaning last frame)
+          animationEndIndex: props.latestAnimatorSettings.animationEndIndex === null || props.latestAnimatorSettings.animationEndIndex === ''
+                             ? (props.latestAnimatorSettings.totalFrames > 0 ? props.latestAnimatorSettings.totalFrames - 1 : null)
+                             : Number(props.latestAnimatorSettings.animationEndIndex)
       };
 
       // Re-enable mkdir and use absolute path
