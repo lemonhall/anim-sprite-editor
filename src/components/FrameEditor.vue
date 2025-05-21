@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onMounted } from 'vue';
+import { ref, watch, onMounted, nextTick } from 'vue';
 
 const props = defineProps({
   frameToEdit: { // Expected: { src: 'image_source_path', index: frame_index, originalSrc: 'original_asset_path_for_saving_if_needed' }
@@ -13,33 +13,86 @@ const emit = defineEmits(['update-frame', 'cancel-edit']);
 const canvasRef = ref(null);
 const ctx = ref(null);
 
-const drawImageOnCanvas = () => {
+// --- State for Cropping ---
+const originalImageForCropping = ref(null); // Stores the original Image object
+const cropRect = ref({ // Stores crop rectangle relative to the original image dimensions
+  x: 0,
+  y: 0,
+  size: 0,
+  isSelecting: false,
+  hasSelection: false,
+});
+const startPoint = ref({ x: 0, y: 0 }); // Mouse down start point on canvas
+const canvasDisplaySize = ref({ width: 0, height: 0 }); // Actual display size of canvas for scaling mouse coords
+// --- End State for Cropping ---
+
+const redrawCanvas = () => {
+  if (!ctx.value || !canvasRef.value) return;
+  const canvas = canvasRef.value;
+  const context = ctx.value;
+
+  // Clear canvas
+  context.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Draw the original image
+  if (originalImageForCropping.value) {
+    context.drawImage(originalImageForCropping.value, 0, 0, canvas.width, canvas.height);
+  }
+
+  // Draw the crop rectangle if selecting or has selection
+  if (originalImageForCropping.value && (cropRect.value.isSelecting || cropRect.value.hasSelection) && cropRect.value.size > 0) {
+    context.strokeStyle = 'rgba(0, 0, 255, 0.7)';
+    context.lineWidth = 2;
+    context.setLineDash([5, 5]); // Dashed line
+    // Coordinates and size are relative to the original image, scale them to canvas display size
+    const displayX = cropRect.value.x * (canvas.width / originalImageForCropping.value.naturalWidth);
+    const displayY = cropRect.value.y * (canvas.height / originalImageForCropping.value.naturalHeight);
+    const displaySize = cropRect.value.size * (canvas.width / originalImageForCropping.value.naturalWidth); // Assuming square aspect ratio for image on canvas
+    
+    context.strokeRect(displayX, displayY, displaySize, displaySize);
+    context.setLineDash([]); // Reset line dash
+  }
+};
+
+const drawImageOnCanvas = async () => {
   if (!canvasRef.value || !props.frameToEdit || !props.frameToEdit.src) {
-    if (ctx.value) { // Clear canvas if no image
-        ctx.value.clearRect(0, 0, canvasRef.value.width, canvasRef.value.height);
+    if (ctx.value) {
+      ctx.value.clearRect(0, 0, canvasRef.value.width, canvasRef.value.height);
     }
+    originalImageForCropping.value = null;
+    cropRect.value = { x: 0, y: 0, size: 0, isSelecting: false, hasSelection: false };
     return;
   }
 
   const img = new Image();
-  img.onload = () => {
-    if (canvasRef.value) { // Check if canvasRef is still valid
-        // Set canvas dimensions based on image, or fixed dimensions
-        canvasRef.value.width = img.naturalWidth;
-        canvasRef.value.height = img.naturalHeight;
-        if (ctx.value) {
-            ctx.value.drawImage(img, 0, 0);
-        }
+  img.onload = async () => {
+    originalImageForCropping.value = img; // Store the original image object
+    if (canvasRef.value) {
+      canvasRef.value.width = img.naturalWidth;
+      canvasRef.value.height = img.naturalHeight;
+
+      // Wait for next tick to ensure canvas dimensions are updated in DOM for getBoundingClientRect
+      await nextTick(); 
+
+      const rect = canvasRef.value.getBoundingClientRect();
+      canvasDisplaySize.value = { width: rect.width, height: rect.height };
+      
+      console.log("Canvas natural/display:", 
+                  img.naturalWidth, img.naturalHeight, 
+                  canvasDisplaySize.value.width, canvasDisplaySize.value.height);
+
+      cropRect.value = { x: 0, y: 0, size: 0, isSelecting: false, hasSelection: false }; // Reset crop
+      redrawCanvas(); 
     }
   };
   img.onerror = (e) => {
     console.error("Error loading image for canvas:", e);
-    // Optionally clear canvas or show error message
+    originalImageForCropping.value = null;
     if (canvasRef.value && ctx.value) {
-        ctx.value.clearRect(0, 0, canvasRef.value.width, canvasRef.value.height);
+      ctx.value.clearRect(0, 0, canvasRef.value.width, canvasRef.value.height);
     }
   };
-  img.src = props.frameToEdit.src; // This should be a URL tauri can load (e.g. asset: protocol or convertFileSrc result)
+  img.src = props.frameToEdit.src;
 };
 
 onMounted(() => {
@@ -51,13 +104,131 @@ onMounted(() => {
 
 watch(() => props.frameToEdit, (newFrame) => {
   console.log("[FrameEditor] frameToEdit prop changed:", newFrame);
-  if (canvasRef.value && ctx.value) { // Ensure canvas context is ready
-    drawImageOnCanvas();
-  } else if (canvasRef.value && !ctx.value) { // If canvas exists but context not yet acquired
+  // Ensure canvas context is ready and reset crop state
+  if (canvasRef.value && !ctx.value) { 
     ctx.value = canvasRef.value.getContext('2d');
-    drawImageOnCanvas();
   }
+  drawImageOnCanvas(); 
 }, { deep: true });
+
+// --- Mouse Event Handlers for Cropping ---
+const getMousePos = (event) => {
+  if (!canvasRef.value || !originalImageForCropping.value) return { x:0, y:0 };
+  const rect = canvasRef.value.getBoundingClientRect();
+  
+  // Scale mouse coordinates from display size to canvas natural size
+  const scaleX = canvasRef.value.width / rect.width;
+  const scaleY = canvasRef.value.height / rect.height;
+  
+  let x = (event.clientX - rect.left) * scaleX;
+  let y = (event.clientY - rect.top) * scaleY;
+
+  // Clamp to image boundaries
+  x = Math.max(0, Math.min(x, canvasRef.value.width));
+  y = Math.max(0, Math.min(y, canvasRef.value.height));
+  return { x, y };
+};
+
+const handleMouseDown = (event) => {
+  if (!originalImageForCropping.value) return;
+  const pos = getMousePos(event);
+  startPoint.value = pos;
+  cropRect.value = {
+    x: pos.x,
+    y: pos.y,
+    size: 0,
+    isSelecting: true,
+    hasSelection: false,
+  };
+  redrawCanvas();
+};
+
+const handleMouseMove = (event) => {
+  if (!cropRect.value.isSelecting || !originalImageForCropping.value) return;
+  const currentPos = getMousePos(event);
+  
+  const deltaX = currentPos.x - startPoint.value.x;
+  const deltaY = currentPos.y - startPoint.value.y;
+  
+  // For square, size is max of absolute deltaX and deltaY
+  let size = Math.max(Math.abs(deltaX), Math.abs(deltaY));
+
+  // Determine top-left corner based on drag direction
+  let newX = startPoint.value.x;
+  let newY = startPoint.value.y;
+
+  if (deltaX < 0) {
+    newX = startPoint.value.x - size;
+  }
+  if (deltaY < 0) {
+    newY = startPoint.value.y - size;
+  }
+  
+  // Ensure cropRect is within image boundaries
+  if (newX < 0) {
+    size += newX; // Reduce size if x goes negative
+    newX = 0;
+  }
+  if (newY < 0) {
+    size += newY; // Reduce size if y goes negative
+    newY = 0;
+  }
+  if (newX + size > canvasRef.value.width) {
+    size = canvasRef.value.width - newX;
+  }
+  if (newY + size > canvasRef.value.height) {
+    size = canvasRef.value.height - newY;
+  }
+  if (size < 0) size = 0; // Prevent negative size
+
+  cropRect.value.x = newX;
+  cropRect.value.y = newY;
+  cropRect.value.size = size;
+  
+  redrawCanvas();
+};
+
+const handleMouseUpOrLeave = (event) => {
+  if (cropRect.value.isSelecting) {
+    cropRect.value.isSelecting = false;
+    if (cropRect.value.size > 5) { // Consider a minimum size for a valid selection
+      cropRect.value.hasSelection = true;
+    } else {
+      cropRect.value.hasSelection = false; 
+      cropRect.value.size = 0; // Ensure size is 0 if not a valid selection
+    }
+    redrawCanvas();
+  }
+};
+
+// --- End Mouse Event Handlers ---
+
+// --- Function to handle Reset Crop ---
+const handleResetCrop = () => {
+  if (!originalImageForCropping.value || !canvasRef.value) return;
+  
+  // Reset crop rectangle state
+  cropRect.value = {
+    x: 0,
+    y: 0,
+    size: 0,
+    isSelecting: false,
+    hasSelection: false,
+  };
+  
+  // Ensure canvas dimensions are reset to original image dimensions
+  // This might be redundant if originalImageForCropping is the sole source for redrawCanvas dimensions
+  // but good for explicit reset.
+  // canvasRef.value.width = originalImageForCropping.value.naturalWidth;
+  // canvasRef.value.height = originalImageForCropping.value.naturalHeight;
+  // Actually, drawImageOnCanvas already handles setting canvas to original image and resetting crop.
+  // So, calling it is simpler if it doesn't trigger a full image reload unnecessarily.
+  // For now, a targeted reset is fine.
+  
+  console.log("[FrameEditor] Crop reset.");
+  redrawCanvas(); // Redraw with no selection
+};
+// --- End Function to handle Reset Crop ---
 
 const saveChanges = () => {
   if (!canvasRef.value || !props.frameToEdit) return;
@@ -75,11 +246,19 @@ const cancelEdit = () => {
 <template>
   <div v-if="frameToEdit" class="frame-editor-component">
     <h3>编辑帧 #{{ frameToEdit.index }}</h3>
-    <canvas ref="canvasRef" class="editor-canvas"></canvas>
+    <canvas 
+      ref="canvasRef" 
+      class="editor-canvas"
+      @mousedown="handleMouseDown"
+      @mousemove="handleMouseMove"
+      @mouseup="handleMouseUpOrLeave"
+      @mouseleave="handleMouseUpOrLeave"
+    ></canvas>
     <div class="editor-controls">
       <button @click="saveChanges">保存更改</button>
       <button @click="cancelEdit">取消</button>
-      <!-- Placeholder for more tools -->
+      <button>应用裁剪</button> <!-- Placeholder -->
+      <button @click="handleResetCrop">重置裁剪</button>
     </div>
   </div>
 </template>
