@@ -2,6 +2,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use tauri::Manager; // 需要 app_handle 来解析路径
+use image::{DynamicImage, GenericImageView, ImageFormat, imageops}; // <-- 添加 image 和 imageops
+use serde::Deserialize; // <-- 添加 Deserialize
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -199,6 +201,118 @@ async fn process_video(path: String, project_name: String, fps: u32) -> Result<V
     }
 }
 
+// 新增：用于接收裁剪参数的结构体
+#[derive(Deserialize, Debug)]
+struct CropRectParams {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+}
+
+// 新增：应用裁剪到多个文件的Tauri命令
+#[tauri::command]
+async fn apply_crop_to_files(original_paths: Vec<String>, crop_params: CropRectParams) -> Result<String, String> {
+    println!("Backend received crop_params: {:?}", crop_params);
+    if crop_params.width == 0 || crop_params.height == 0 {
+        return Err("Crop dimensions (width and height) cannot be zero.".to_string());
+    }
+
+    let mut successful_crops = 0;
+    let total_files = original_paths.len();
+
+    for img_path_str in original_paths {
+        println!("Processing file: {}", img_path_str);
+        let img_path = PathBuf::from(&img_path_str);
+
+        // 检查路径是否以 \\?\ 开头，如果是，则移除它以便 image::open 能正确处理
+        // image crate 可能无法直接处理带有 \\?\ 前缀的路径
+        let path_to_open = if img_path_str.starts_with("\\\\?\\") {
+            PathBuf::from(&img_path_str[4..])
+        } else {
+            img_path.clone()
+        };
+        
+        println!("Attempting to open (cleaned path): {}", path_to_open.display());
+
+        match image::open(&path_to_open) {
+            Ok(mut img) => {
+                let (original_width, original_height) = img.dimensions();
+                println!("Original dimensions: {}x{}", original_width, original_height);
+
+                // 边界检查
+                if crop_params.x >= original_width || crop_params.y >= original_height {
+                    let err_msg = format!(
+                        "Crop X ({}) or Y ({}) is out of bounds for image {} ({}x{}).",
+                        crop_params.x, crop_params.y, img_path_str, original_width, original_height
+                    );
+                    eprintln!("{}", err_msg);
+                    // 选择是跳过这个文件还是整体失败。这里我们选择记录错误并跳过。
+                    // 如果希望整体失败，可以 return Err(err_msg);
+                    continue; 
+                }
+
+                let final_crop_width = if crop_params.x + crop_params.width > original_width {
+                    original_width - crop_params.x
+                } else {
+                    crop_params.width
+                };
+
+                let final_crop_height = if crop_params.y + crop_params.height > original_height {
+                    original_height - crop_params.y
+                } else {
+                    crop_params.height
+                };
+                
+                if final_crop_width == 0 || final_crop_height == 0 {
+                     let err_msg = format!(
+                        "Calculated final crop width or height is zero for image {}. Skipping.",
+                        img_path_str
+                    );
+                    eprintln!("{}", err_msg);
+                    continue;
+                }
+
+
+                println!("Applying crop: x={}, y={}, width={}, height={}", crop_params.x, crop_params.y, final_crop_width, final_crop_height);
+
+                let cropped_img = imageops::crop_imm(&mut img, crop_params.x, crop_params.y, final_crop_width, final_crop_height).to_image();
+                
+                // 保存回原始路径 (使用原始的 img_path，它可能包含 \\?\ 前缀，fs 操作可以处理它)
+                // 注意：这里我们直接覆盖原文件
+                match cropped_img.save(&img_path) {
+                    Ok(_) => {
+                        println!("Successfully cropped and saved {}", img_path.display());
+                        successful_crops += 1;
+                    }
+                    Err(e) => {
+                        let err_msg = format!("Failed to save cropped image {}: {}", img_path.display(), e);
+                        eprintln!("{}", err_msg);
+                        // 根据需要决定是否因为单个文件保存失败而整体失败
+                        // return Err(err_msg); 
+                    }
+                }
+            }
+            Err(e) => {
+                let err_msg = format!("Failed to open image {}: {}. Cleaned path used: {}", img_path_str, e, path_to_open.display());
+                eprintln!("{}", err_msg);
+                // return Err(err_msg); // 决定是否因单个文件打开失败而整体失败
+            }
+        }
+    }
+
+    if successful_crops == total_files && total_files > 0 {
+        Ok(format!("Successfully cropped {} files.", successful_crops))
+    } else if successful_crops > 0 {
+        Ok(format!("Partially successful: cropped {} out of {} files. Check logs for errors.", successful_crops, total_files))
+    } else if total_files == 0 {
+        Ok("No files to crop.".to_string())
+    }
+    else {
+        Err("Failed to crop any files. Check logs for errors.".to_string())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -208,7 +322,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet, 
             process_video,
-            get_src_tauri_projects_path // 添加新命令
+            get_src_tauri_projects_path,
+            apply_crop_to_files // <-- 添加新的命令
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
