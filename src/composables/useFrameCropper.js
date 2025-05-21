@@ -1,6 +1,7 @@
 import { ref, watch } from 'vue';
 
-export default function useFrameCropper(canvasRef, originalImage, redrawCanvasCallback) {
+export default function useFrameCropper(canvasRef, originalImage, redrawCanvasCallback, initialIsActive = true) {
+  const isToolActive = ref(initialIsActive);
   const cropRect = ref({
     x: 0,
     y: 0,
@@ -9,6 +10,22 @@ export default function useFrameCropper(canvasRef, originalImage, redrawCanvasCa
     hasSelection: false,
   });
   const startPoint = ref({ x: 0, y: 0 });
+
+  const activate = () => {
+    isToolActive.value = true;
+    if (canvasRef.value) {
+      canvasRef.value.style.cursor = 'crop'; // Or specific crop cursor
+    }
+    console.log("[useFrameCropper] Activated. isToolActive:", isToolActive.value);
+  };
+
+  const deactivate = () => {
+    isToolActive.value = false;
+    if (canvasRef.value) {
+      canvasRef.value.style.cursor = 'default';
+    }
+    console.log("[useFrameCropper] Deactivated. isToolActive:", isToolActive.value);
+  };
 
   const getMousePos = (event) => {
     if (!canvasRef.value || !originalImage.value) return { x: 0, y: 0 };
@@ -23,7 +40,8 @@ export default function useFrameCropper(canvasRef, originalImage, redrawCanvasCa
   };
 
   const handleMouseDown = (event) => {
-    if (!originalImage.value) return;
+    console.log("[useFrameCropper] handleMouseDown. isToolActive:", isToolActive.value);
+    if (!isToolActive.value || !originalImage.value) return;
     const pos = getMousePos(event);
     startPoint.value = pos;
     cropRect.value = {
@@ -37,7 +55,8 @@ export default function useFrameCropper(canvasRef, originalImage, redrawCanvasCa
   };
 
   const handleMouseMove = (event) => {
-    if (!cropRect.value.isSelecting || !originalImage.value) return;
+    console.log("[useFrameCropper] handleMouseMove. isToolActive:", isToolActive.value, "isSelecting:", cropRect.value.isSelecting);
+    if (!isToolActive.value || !cropRect.value.isSelecting || !originalImage.value) return;
     const currentPos = getMousePos(event);
     const deltaX = currentPos.x - startPoint.value.x;
     const deltaY = currentPos.y - startPoint.value.y;
@@ -71,16 +90,16 @@ export default function useFrameCropper(canvasRef, originalImage, redrawCanvasCa
   };
 
   const handleMouseUpOrLeave = () => {
-    if (cropRect.value.isSelecting) {
-      cropRect.value.isSelecting = false;
-      if (cropRect.value.size > 5) {
-        cropRect.value.hasSelection = true;
-      } else {
-        cropRect.value.hasSelection = false;
-        cropRect.value.size = 0;
-      }
-      if (redrawCanvasCallback) redrawCanvasCallback();
+    console.log("[useFrameCropper] handleMouseUpOrLeave. isToolActive:", isToolActive.value, "isSelecting:", cropRect.value.isSelecting);
+    if (!isToolActive.value || !cropRect.value.isSelecting) return;
+    cropRect.value.isSelecting = false;
+    if (cropRect.value.size > 5) {
+      cropRect.value.hasSelection = true;
+    } else {
+      cropRect.value.hasSelection = false;
+      cropRect.value.size = 0;
     }
+    if (redrawCanvasCallback) redrawCanvasCallback();
   };
 
   const resetCrop = () => {
@@ -118,17 +137,25 @@ export default function useFrameCropper(canvasRef, originalImage, redrawCanvasCa
   // Watch for changes in the original image to reset crop state
   watch(originalImage, (newImg, oldImg) => {
     if (newImg !== oldImg) {
-      console.log("[useFrameCropper] Original image changed, resetting crop.");
-      resetCrop();
+      // console.log("[useFrameCropper] Original image changed, resetting crop.");
+      resetCrop(); // Reset crop when image changes, active or not
     }
-  }, { deep: true }); // deep might not be necessary if originalImage is just a ref to Image object
+  }, { deep: true });
+
+  // Activate on init if specified
+  if (initialIsActive) {
+    activate();
+  }
 
   return {
     cropRect,
+    isToolActive, // Export for external checks if needed, though mostly internal
     handleMouseDown,
     handleMouseMove,
     handleMouseUpOrLeave,
     resetCrop,
-    drawCropSelection
+    drawCropSelection,
+    activate,
+    deactivate
   };
 } 
