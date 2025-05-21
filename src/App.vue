@@ -218,7 +218,7 @@ async function handleSourceFilesUpdatedFromEditor() {
 }
 
 // Handler for export request from FrameAnimator
-const onExportFramesRequested = async ({ startIndex, endIndex }) => {
+const onExportFramesRequested = async ({ startIndex, endIndex, spriteNamePrefix }) => {
   if (!currentProjectName.value) {
     exportError.value = "请先设置项目名称再导出。";
     processingMessage.value = "请先设置项目名称再导出。";
@@ -228,7 +228,7 @@ const onExportFramesRequested = async ({ startIndex, endIndex }) => {
   exportError.value = null;
   exportSuccessMessage.value = null;
   
-  const success = await handleExportSelectedFrames(startIndex, endIndex, currentProjectName.value);
+  const success = await handleExportSelectedFrames(startIndex, endIndex, currentProjectName.value, spriteNamePrefix);
   
   if (success) {
     processingMessage.value = exportSuccessMessage.value;

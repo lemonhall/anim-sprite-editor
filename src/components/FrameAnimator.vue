@@ -38,6 +38,7 @@ const currentFrameDisplayIndex = ref(0);
 const inputStartIndex = ref(0);
 const inputEndIndex = ref(null);
 const playbackFpsInput = ref(10); // For the new playback FPS input field
+const spriteNamePrefixInput = ref('frame'); // New ref for sprite name prefix
 
 // Internal state for the actual playback range & FPS
 const actualPlaybackStartIndex = ref(0);
@@ -215,9 +216,10 @@ function handleExportSelection() {
   if (currentSequenceLength.value > 0 && props.frames.length > 0) {
     emit('export-frames-requested', { 
       startIndex: actualPlaybackStartIndex.value, 
-      endIndex: actualPlaybackEndIndex.value 
+      endIndex: actualPlaybackEndIndex.value,
+      spriteNamePrefix: spriteNamePrefixInput.value || 'frame' // Pass the prefix
     });
-    console.log(`Export requested for frames from index ${actualPlaybackStartIndex.value} to ${actualPlaybackEndIndex.value}`);
+    console.log(`Export requested for frames from index ${actualPlaybackStartIndex.value} to ${actualPlaybackEndIndex.value} with prefix '${spriteNamePrefixInput.value || 'frame'}'`);
   } else {
     console.warn("Export selection called but no valid sequence or frames available.");
   }
@@ -300,15 +302,26 @@ onBeforeUnmount(() => {
       <div v-else class="placeholder-text">暂无帧可播放</div>
     </div>
     
-    <!-- Ensure this section is present -->
-    <div class="export-controls" style="margin-top: 15px;">
-      <button 
-        @click="handleExportSelection" 
-        :disabled="currentSequenceLength === 0 || frames.length === 0"
-        class="export-button"
-      >
-        导出选定帧到 outputs
-      </button>
+    <div class="export-controls-wrapper">
+      <div class="input-group-control sprite-name-prefix-control">
+        <label for="sprite-name-prefix">导出文件名前缀:</label>
+        <input 
+          type="text" 
+          id="sprite-name-prefix" 
+          v-model.trim="spriteNamePrefixInput" 
+          placeholder="例如: zombie_walk"
+          :disabled="frames.length === 0"
+        />
+      </div>
+      <div class="export-controls" style="margin-top: 10px;"> <!-- Adjusted margin -->
+        <button 
+          @click="handleExportSelection" 
+          :disabled="currentSequenceLength === 0 || frames.length === 0"
+          class="export-button"
+        >
+          导出选定帧到 outputs
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -443,6 +456,37 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
+.export-controls-wrapper { /* New wrapper for prefix input and button */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 15px;
+  width: 100%; /* Or a specific max-width */
+  max-width: 400px; /* Example max-width */
+}
+
+.sprite-name-prefix-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%; /* Make it take available width in the wrapper */
+}
+
+.sprite-name-prefix-control label {
+  font-size: 0.85em;
+  white-space: nowrap;
+  /* color: #333; // Default color, will be overridden by dark mode if needed */
+}
+
+.sprite-name-prefix-control input[type="text"] {
+  flex-grow: 1; /* Allow input to take remaining space */
+  padding: 0.3em 0.5em;
+  font-size: 0.85em;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
 @media (prefers-color-scheme: dark) {
   .animation-section-component {
     background-color: #3a3a3a;
@@ -495,6 +539,18 @@ onBeforeUnmount(() => {
     background-color: #555;
     border-color: #666;
     color: #aaa;
+  }
+  .sprite-name-prefix-control label {
+    color: #f0f0f0; 
+  }
+  .sprite-name-prefix-control input[type="text"] {
+    background-color: #2f2f2f;
+    color: #f0f0f0;
+    border-color: #555;
+  }
+  .sprite-name-prefix-control input[type="text"]:disabled {
+    background-color: #444;
+    color: #888;
   }
 }
 </style> 

@@ -12,15 +12,18 @@ export default function useFrameExporter(
     const exportError = ref(null);
     const exportSuccessMessage = ref('');
 
-    const generateFileName = (index, totalFrames) => {
-        // Simple zero-padding, adjust as needed
-        // Ensure totalFrames is at least 1 to avoid issues with String(0).length
+    const generateFileName = (prefix, index, totalFrames) => {
+        const safePrefix = (prefix && typeof prefix === 'string' && prefix.trim() !== '') ? prefix.trim() : 'frame';
         const actualTotalFrames = Math.max(1, totalFrames);
-        const numDigits = String(actualTotalFrames -1).length;
-        return `frame_${String(index).padStart(numDigits, '0')}.png`;
+        const numDigits = String(actualTotalFrames -1).length > 0 ? String(actualTotalFrames -1).length : 1;
+        return `${safePrefix}_${String(index).padStart(numDigits, '0')}.png`;
     };
 
-    const handleExportSelectedFrames = async (startIndex, endIndex, projectName) => {
+    const handleExportSelectedFrames = async (startIndex, endIndex, projectName, spriteNamePrefix) => {
+        const currentPrefix = (spriteNamePrefix && typeof spriteNamePrefix === 'string' && spriteNamePrefix.trim() !== '') 
+                                ? spriteNamePrefix.trim() 
+                                : 'frame';
+
         if (!projectName || typeof projectName !== 'string' || projectName.trim() === '') {
             exportError.value = "项目名称无效。";
             isExporting.value = false;
@@ -51,7 +54,7 @@ export default function useFrameExporter(
             for (let i = startIndex; i <= endIndex; i++) {
                 const frameSource = extractedFramesRef.value[i];
                 const originalFilePath = projectOriginalFramePathsRef.value[i];
-                const fileName = generateFileName(i, totalFramesForNaming);
+                const fileName = generateFileName(currentPrefix, i, totalFramesForNaming);
                 let itemToAdd = null;
 
                 if (frameEditorRef && frameEditorRef.value && 
